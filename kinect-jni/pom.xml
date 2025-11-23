@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.kinect</groupId>
+        <artifactId>kinect-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>kinect-jni</artifactId>
+    <packaging>jar</packaging>
+
+    <name>Kinect JNI Bindings</name>
+    <description>
+        Low-level JNI bindings to libfreenect2 for Kinect V2.
+        Provides Java interfaces and native C++ implementation.
+    </description>
+
+    <dependencies>
+        <!-- SLF4J Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <!-- Testing -->
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Java Compiler with JNI header generation -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <compilerArgs>
+                        <arg>-h</arg>
+                        <arg>${project.build.directory}/native/include</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <!-- Maven AntRun Plugin: Compile native C++ code -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>compile-native</id>
+                        <phase>compile</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <!-- Create target/objs directory -->
+                                <mkdir dir="${project.build.directory}/objs"/>
+                                
+                                <!-- Compile C++ source to object file -->
+                                <exec executable="clang++" failonerror="true">
+                                    <arg value="-std=c++11"/>
+                                    <arg value="-stdlib=libc++"/>
+                                    <arg value="-arch"/>
+                                    <arg value="arm64"/>
+                                    <arg value="-fPIC"/>
+                                    <arg value="-I${java.home}/include"/>
+                                    <arg value="-I${java.home}/include/darwin"/>
+                                    <arg value="-I${freenect2.include}"/>
+                                    <arg value="-I${project.build.directory}/native/include"/>
+                                    <arg value="-I${basedir}/src/main/cpp"/>
+                                    <arg value="-o"/>
+                                    <arg value="${project.build.directory}/objs/Freenect2JNI.o"/>
+                                    <arg value="-c"/>
+                                    <arg value="${basedir}/src/main/cpp/Freenect2JNI.cpp"/>
+                                </exec>
+                                
+                                <!-- Link object file to dynamic library -->
+                                <exec executable="clang++" failonerror="true">
+                                    <arg value="-dynamiclib"/>
+                                    <arg value="-arch"/>
+                                    <arg value="arm64"/>
+                                    <arg value="-L${freenect2.lib}"/>
+                                    <arg value="-lfreenect2"/>
+                                    <arg value="-L/opt/homebrew/lib"/>
+                                    <arg value="-lusb-1.0"/>
+                                    <arg value="-install_name"/>
+                                    <arg value="@rpath/libkinect-jni.dylib"/>
+                                    <arg value="-o"/>
+                                    <arg value="${project.build.directory}/libkinect-jni.dylib"/>
+                                    <arg value="${project.build.directory}/objs/Freenect2JNI.o"/>
+                                </exec>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- JAR Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Implementation-Title>${project.name}</Implementation-Title>
+                            <Implementation-Version>${project.version}</Implementation-Version>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+
+            <!-- Build Helper Plugin: Attach native library as supplemental artifact -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.4.0</version>
+                <executions>
+                    <execution>
+                        <id>attach-native-lib</id>
+                        <phase>install</phase>
+                        <goals>
+                            <goal>attach-artifact</goal>
+                        </goals>
+                        <configuration>
+                            <artifacts>
+                                <artifact>
+                                    <file>${project.build.directory}/libkinect-jni.dylib</file>
+                                    <type>dylib</type>
+                                    <classifier>natives-osx-arm64</classifier>
+                                </artifact>
+                            </artifacts>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
