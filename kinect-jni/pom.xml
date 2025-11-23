@@ -163,6 +163,30 @@
                     </execution>
                 </executions>
             </plugin>
+
+            <!-- Exec Maven Plugin: Run FrameCaptureDemo -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>run-demo</id>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>java</executable>
+                            <arguments>
+                                <argument>-Djava.library.path=${project.build.directory}${path.separator}${freenect2.lib}</argument>
+                                <argument>-classpath</argument>
+                                <classpath/>
+                                <argument>com.kinect.jni.FrameCaptureDemo</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 

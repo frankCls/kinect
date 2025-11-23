@@ -681,6 +681,78 @@ java -Djava.library.path=kinect-jni/target:$HOME/freenect2/lib \
 - install_name_tool for libfreenect2 rpath resolution
 - @Ignore annotations for OpenGL-dependent tests with explanation
 
+### Standalone Test Application
+
+**Created**: `kinect-jni/src/main/java/com/kinect/jni/FrameCaptureDemo.java`
+
+A standalone Java application that tests frame capture with proper display context, avoiding Maven Surefire's headless environment.
+
+**Features**:
+- Console output with frame metadata (always enabled)
+- Optional AWT/Swing window display (via `--gui` flag)
+- Captures all three frame types: Color (1920x1080), Depth (512x424), IR (512x424)
+- Configurable capture duration and frame counts
+- Real-time statistics and progress indicators
+- Graceful error handling and resource cleanup
+
+**Usage**:
+
+**IMPORTANT**: This application requires a GUI terminal session (not headless SSH) because OpenGL initialization needs display context. Run this from a local terminal or GUI session on the machine.
+
+```bash
+# Using the provided script (recommended):
+cd kinect-jni
+./run-demo.sh                              # Console only, default settings
+./run-demo.sh --gui                        # With visual window
+./run-demo.sh --duration 30 --frames 100   # Custom settings
+./run-demo.sh --gui --duration 20 --frames 50
+
+# Or run directly with Java:
+cd kinect-jni
+java -Djava.library.path=target:$HOME/freenect2/lib \
+     -cp target/classes \
+     com.kinect.jni.FrameCaptureDemo \
+     --duration 5 --frames 10
+
+# Show help
+./run-demo.sh --help
+```
+
+**Note**: If you're connected via SSH without X11 forwarding, the OpenGL pipeline will hang during initialization. This is the same limitation that affects Maven tests.
+
+**Console Output Example**:
+```
+=== Kinect V2 Frame Capture Demo ===
+Native library loaded: ✓
+libfreenect2 version: 0.2.0
+Found 1 Kinect device(s)
+Device serial: 230921433847
+Opening device...
+Device opened successfully
+Firmware version: 4.0.1234.0
+
+Starting frame capture...
+[COLOR] Frame 1/30: seq=1234, timestamp=1234.567, 1920x1080x4, 8294400 bytes
+[DEPTH] Frame 1/30: seq=1235, timestamp=1234.578, 512x424x4, 867328 bytes
+[IR] Frame 1/30: seq=1236, timestamp=1234.589, 512x424x4, 867328 bytes
+...
+
+=== Capture Statistics ===
+COLOR frames: 30/30 (100.0%) - 0 timeouts
+DEPTH frames: 30/30 (100.0%) - 0 timeouts
+IR frames: 30/30 (100.0%) - 0 timeouts
+
+Total frames captured: 90
+Average capture rate: 28.5 fps
+```
+
+**GUI Mode**:
+When `--gui` is enabled, a window displays live frames in a 3-panel layout (Color, Depth, IR) with real-time updates.
+
+**Added to pom.xml**:
+- `exec-maven-plugin` configured with proper `java.library.path`
+- Main class: `com.kinect.jni.FrameCaptureDemo`
+
 ### Next Steps
 
 Phase 3 JNI layer is fully functional. Ready to proceed with:
