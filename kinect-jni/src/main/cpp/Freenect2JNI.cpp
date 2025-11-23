@@ -22,6 +22,19 @@
 #include <memory>
 #include <map>
 #include <mutex>
+#include <condition_variable>
+
+// macOS-specific includes for Grand Central Dispatch
+#ifdef __APPLE__
+#include <dispatch/dispatch.h>
+#include <CoreFoundation/CoreFoundation.h>
+
+// GLFW forward declarations (to check initialization status)
+extern "C" {
+    int glfwInit(void);
+    void glfwTerminate(void);
+}
+#endif
 
 // Utility macros for JNI
 #define JNI_METHOD(return_type, class_name, method_name) \
@@ -30,6 +43,111 @@
 // Start of extern "C" block for JNI functions
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+// ============================================================================
+// macOS Main Thread Support for GLFW/OpenGL
+// ============================================================================
+
+#ifdef __APPLE__
+// Global state for GLFW initialization
+static bool g_glfwInitialized = false;
+static std::mutex g_glfwMutex;
+static std::condition_variable g_glfwCondVar;
+static bool g_glfwInitInProgress = false;
+
+/**
+ * Initialize GLFW on the macOS main thread.
+ * This MUST be called on the main thread due to macOS requirements.
+ */
+void initializeGLFWOnMainThread() {
+    std::lock_guard<std::mutex> lock(g_glfwMutex);
+
+    if (g_glfwInitialized) {
+        return; // Already initialized
+    }
+
+    fprintf(stderr, "[JNI] Initializing GLFW on main thread...\n");
+    fflush(stderr);
+
+    int result = glfwInit();
+    if (result == 0) {
+        fprintf(stderr, "[JNI] ERROR: glfwInit() failed\n");
+        fflush(stderr);
+    } else {
+        g_glfwInitialized = true;
+        fprintf(stderr, "[JNI] GLFW initialized successfully\n");
+        fflush(stderr);
+    }
+}
+
+/**
+ * Ensure GLFW is initialized, dispatching to main thread if necessary.
+ */
+void ensureGLFWInitialized() {
+    std::unique_lock<std::mutex> lock(g_glfwMutex);
+
+    if (g_glfwInitialized) {
+        return; // Already initialized
+    }
+
+    if (g_glfwInitInProgress) {
+        // Another thread is already initializing, wait for it
+        g_glfwCondVar.wait(lock, [] { return g_glfwInitialized; });
+        return;
+    }
+
+    g_glfwInitInProgress = true;
+    lock.unlock();
+
+    fprintf(stderr, "[JNI] GLFW not initialized, dispatching to main thread...\n");
+    fflush(stderr);
+
+    // Dispatch to main thread
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        initializeGLFWOnMainThread();
+    });
+
+    lock.lock();
+    g_glfwInitInProgress = false;
+    g_glfwCondVar.notify_all();
+}
+
+/**
+ * Create OpenGL pipeline on the main thread.
+ * The OpenGLPacketPipeline constructor creates OpenGL contexts which must be
+ * done on the main thread on macOS.
+ */
+libfreenect2::PacketPipeline* createOpenGLPipelineOnMainThread() {
+    __block libfreenect2::PacketPipeline* pipeline = nullptr;
+    __block bool pipelineCreated = false;
+    __block std::string errorMessage;
+
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        try {
+            fprintf(stderr, "[JNI] Creating OpenGL pipeline on main thread...\n");
+            fflush(stderr);
+            pipeline = new libfreenect2::OpenGLPacketPipeline();
+            fprintf(stderr, "[JNI] OpenGL pipeline created successfully\n");
+            fflush(stderr);
+            pipelineCreated = true;
+        } catch (const std::exception &e) {
+            errorMessage = e.what();
+            fprintf(stderr, "[JNI] ERROR creating pipeline: %s\n", e.what());
+            fflush(stderr);
+        } catch (...) {
+            errorMessage = "Unknown exception creating OpenGL pipeline";
+            fprintf(stderr, "[JNI] ERROR: Unknown exception creating pipeline\n");
+            fflush(stderr);
+        }
+    });
+
+    if (!pipelineCreated) {
+        throw std::runtime_error(errorMessage);
+    }
+
+    return pipeline;
+}
 #endif
 
 // Structure to hold device state including frame listener
@@ -162,7 +280,20 @@ JNI_METHOD(jlong, FreenectContext, nativeCreateContext)(JNIEnv *env, jobject obj
 JNI_METHOD(void, FreenectContext, nativeDestroyContext)(JNIEnv *env, jobject obj, jlong handle) {
     if (handle != 0) {
         libfreenect2::Freenect2 *freenect2 = reinterpret_cast<libfreenect2::Freenect2*>(handle);
+
+#ifdef __APPLE__
+        // On macOS, GLFW cleanup must also happen on the main thread
+        // The OpenGLPacketPipeline destructor calls glfwDestroyWindow which requires main thread
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            fprintf(stderr, "[JNI] Destroying Freenect2 context on main thread...\n");
+            fflush(stderr);
+            delete freenect2;
+            fprintf(stderr, "[JNI] Freenect2 context destroyed\n");
+            fflush(stderr);
+        });
+#else
         delete freenect2;
+#endif
     }
 }
 
@@ -277,12 +408,18 @@ JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlon
             return 0;
         }
 
-        // Create OpenGL pipeline (same as Protonect uses - verified working)
+#ifdef __APPLE__
+        // On macOS, create OpenGL pipeline on the main thread
+        // Both GLFW initialization and OpenGL context creation must happen on main thread
+        libfreenect2::PacketPipeline *pipeline = createOpenGLPipelineOnMainThread();
+#else
+        // On other platforms, create pipeline normally
         fprintf(stderr, "[JNI] Creating OpenGL pipeline...\n");
         fflush(stderr);
         libfreenect2::PacketPipeline *pipeline = new libfreenect2::OpenGLPacketPipeline();
         fprintf(stderr, "[JNI] OpenGL pipeline created\n");
         fflush(stderr);
+#endif
 
         // Open device with OpenGL pipeline
         fprintf(stderr, "[JNI] Opening device...\n");

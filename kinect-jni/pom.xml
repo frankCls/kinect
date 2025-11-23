@@ -92,6 +92,7 @@
                                     <arg value="-L${freenect2.lib}"/>
                                     <arg value="-lfreenect2"/>
                                     <arg value="-L/opt/homebrew/lib"/>
+                                    <arg value="-lglfw"/>
                                     <arg value="-lusb-1.0"/>
                                     <arg value="-install_name"/>
                                     <arg value="@rpath/libkinect-jni.dylib"/>
