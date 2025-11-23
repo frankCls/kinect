@@ -21,10 +21,31 @@
 #include <string>
 #include <memory>
 #include <map>
+#include <mutex>
 
 // Utility macros for JNI
 #define JNI_METHOD(return_type, class_name, method_name) \
     JNIEXPORT return_type JNICALL Java_com_kinect_jni_##class_name##_##method_name
+
+// Structure to hold device state including frame listener
+struct DeviceContext {
+    libfreenect2::Freenect2Device *device;
+    libfreenect2::SyncMultiFrameListener *listener;
+
+    DeviceContext(libfreenect2::Freenect2Device *dev)
+        : device(dev), listener(nullptr) {}
+
+    ~DeviceContext() {
+        if (listener != nullptr) {
+            delete listener;
+            listener = nullptr;
+        }
+    }
+};
+
+// Global registry of device contexts (thread-safe)
+static std::map<jlong, DeviceContext*> deviceRegistry;
+static std::mutex registryMutex;
 
 // Helper function to throw Java exceptions
 void throwRuntimeException(JNIEnv *env, const char *message) {
@@ -32,6 +53,69 @@ void throwRuntimeException(JNIEnv *env, const char *message) {
     if (exceptionClass != nullptr) {
         env->ThrowNew(exceptionClass, message);
     }
+}
+
+// Helper to get DeviceContext safely
+DeviceContext* getDeviceContext(jlong handle) {
+    std::lock_guard<std::mutex> lock(registryMutex);
+    auto it = deviceRegistry.find(handle);
+    if (it != deviceRegistry.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
+// Helper to create Java Frame object from native frame
+jobject createJavaFrame(JNIEnv *env, libfreenect2::Frame *frame, int frameTypeValue) {
+    // Find Frame class and constructor
+    jclass frameClass = env->FindClass("com/kinect/jni/Frame");
+    if (frameClass == nullptr) {
+        return nullptr;
+    }
+
+    // Find FrameType enum
+    jclass frameTypeClass = env->FindClass("com/kinect/jni/FrameType");
+    if (frameTypeClass == nullptr) {
+        return nullptr;
+    }
+
+    // Get FrameType.fromNativeValue(int) static method
+    jmethodID fromNativeValueMethod = env->GetStaticMethodID(
+        frameTypeClass, "fromNativeValue", "(I)Lcom/kinect/jni/FrameType;");
+    if (fromNativeValueMethod == nullptr) {
+        return nullptr;
+    }
+
+    // Get FrameType enum instance
+    jobject frameType = env->CallStaticObjectMethod(
+        frameTypeClass, fromNativeValueMethod, frameTypeValue);
+    if (frameType == nullptr) {
+        return nullptr;
+    }
+
+    // Find Frame constructor
+    // Frame(long nativeHandle, FrameType type, int width, int height,
+    //       int bytesPerPixel, long timestamp, long sequence)
+    jmethodID frameConstructor = env->GetMethodID(
+        frameClass, "<init>",
+        "(JLcom/kinect/jni/FrameType;IIJJ)V");
+    if (frameConstructor == nullptr) {
+        return nullptr;
+    }
+
+    // Create Frame object
+    jobject javaFrame = env->NewObject(
+        frameClass, frameConstructor,
+        reinterpret_cast<jlong>(frame),
+        frameType,
+        static_cast<jint>(frame->width),
+        static_cast<jint>(frame->height),
+        static_cast<jint>(frame->bytes_per_pixel),
+        static_cast<jlong>(frame->timestamp),
+        static_cast<jlong>(frame->sequence)
+    );
+
+    return javaFrame;
 }
 
 // ============================================================================
@@ -53,7 +137,7 @@ JNI_METHOD(jstring, Freenect, getVersion)(JNIEnv *env, jclass clazz) {
 /**
  * Create a new Freenect2 context.
  *
- * @return native pointer to libfreenect2::Freenect2 object
+ * @return native pointer to libfreenect2::Freenect2, or 0 on failure
  */
 JNI_METHOD(jlong, FreenectContext, nativeCreateContext)(JNIEnv *env, jobject obj) {
     try {
@@ -147,7 +231,7 @@ JNI_METHOD(jstring, FreenectContext, nativeGetDefaultDeviceSerial)(JNIEnv *env, 
 }
 
 // ============================================================================
-// KinectDevice class native methods (to be continued in next iteration)
+// KinectDevice class native methods
 // ============================================================================
 
 /**
@@ -155,7 +239,7 @@ JNI_METHOD(jstring, FreenectContext, nativeGetDefaultDeviceSerial)(JNIEnv *env, 
  *
  * @param contextHandle native pointer to libfreenect2::Freenect2
  * @param serial device serial (null for default)
- * @return native pointer to libfreenect2::Freenect2Device
+ * @return native pointer to DeviceContext
  */
 JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlong contextHandle, jstring serial) {
     if (contextHandle == 0) {
@@ -183,7 +267,17 @@ JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlon
             return 0;
         }
 
-        return reinterpret_cast<jlong>(device);
+        // Create device context
+        DeviceContext *ctx = new DeviceContext(device);
+        jlong handle = reinterpret_cast<jlong>(ctx);
+
+        // Register in global map
+        {
+            std::lock_guard<std::mutex> lock(registryMutex);
+            deviceRegistry[handle] = ctx;
+        }
+
+        return handle;
     } catch (const std::exception &e) {
         throwRuntimeException(env, e.what());
         return 0;
@@ -193,20 +287,32 @@ JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlon
 /**
  * Close a Kinect device.
  *
- * @param handle native pointer to libfreenect2::Freenect2Device
+ * @param handle native pointer to DeviceContext
  */
 JNI_METHOD(void, KinectDevice, nativeCloseDevice)(JNIEnv *env, jobject obj, jlong handle) {
-    if (handle != 0) {
-        libfreenect2::Freenect2Device *device = reinterpret_cast<libfreenect2::Freenect2Device*>(handle);
-        device->close();
-        // Note: libfreenect2 manages device lifetime, we don't delete it
+    if (handle == 0) {
+        return;
+    }
+
+    DeviceContext *ctx = getDeviceContext(handle);
+    if (ctx != nullptr) {
+        if (ctx->device != nullptr) {
+            ctx->device->close();
+        }
+
+        // Remove from registry and delete
+        {
+            std::lock_guard<std::mutex> lock(registryMutex);
+            deviceRegistry.erase(handle);
+        }
+        delete ctx;
     }
 }
 
 /**
  * Get device firmware version.
  *
- * @param handle native pointer to libfreenect2::Freenect2Device
+ * @param handle native pointer to DeviceContext
  * @return firmware version string
  */
 JNI_METHOD(jstring, KinectDevice, nativeGetFirmwareVersion)(JNIEnv *env, jobject obj, jlong handle) {
@@ -216,8 +322,13 @@ JNI_METHOD(jstring, KinectDevice, nativeGetFirmwareVersion)(JNIEnv *env, jobject
     }
 
     try {
-        libfreenect2::Freenect2Device *device = reinterpret_cast<libfreenect2::Freenect2Device*>(handle);
-        std::string version = device->getFirmwareVersion();
+        DeviceContext *ctx = getDeviceContext(handle);
+        if (ctx == nullptr || ctx->device == nullptr) {
+            throwRuntimeException(env, "Invalid device context");
+            return nullptr;
+        }
+
+        std::string version = ctx->device->getFirmwareVersion();
         return env->NewStringUTF(version.c_str());
     } catch (const std::exception &e) {
         throwRuntimeException(env, e.what());
@@ -228,7 +339,7 @@ JNI_METHOD(jstring, KinectDevice, nativeGetFirmwareVersion)(JNIEnv *env, jobject
 /**
  * Start streaming with all frame types.
  *
- * @param handle native pointer to libfreenect2::Freenect2Device
+ * @param handle native pointer to DeviceContext
  * @return true if successful
  */
 JNI_METHOD(jboolean, KinectDevice, nativeStart)(JNIEnv *env, jobject obj, jlong handle) {
@@ -238,16 +349,20 @@ JNI_METHOD(jboolean, KinectDevice, nativeStart)(JNIEnv *env, jobject obj, jlong 
     }
 
     try {
-        libfreenect2::Freenect2Device *device = reinterpret_cast<libfreenect2::Freenect2Device*>(handle);
+        DeviceContext *ctx = getDeviceContext(handle);
+        if (ctx == nullptr || ctx->device == nullptr) {
+            throwRuntimeException(env, "Invalid device context");
+            return JNI_FALSE;
+        }
 
         // Create frame listener for all types
         int types = libfreenect2::Frame::Color | libfreenect2::Frame::Ir | libfreenect2::Frame::Depth;
-        libfreenect2::SyncMultiFrameListener *listener = new libfreenect2::SyncMultiFrameListener(types);
+        ctx->listener = new libfreenect2::SyncMultiFrameListener(types);
 
-        device->setColorFrameListener(listener);
-        device->setIrAndDepthFrameListener(listener);
+        ctx->device->setColorFrameListener(ctx->listener);
+        ctx->device->setIrAndDepthFrameListener(ctx->listener);
 
-        bool success = device->start();
+        bool success = ctx->device->start();
         return success ? JNI_TRUE : JNI_FALSE;
     } catch (const std::exception &e) {
         throwRuntimeException(env, e.what());
@@ -258,19 +373,41 @@ JNI_METHOD(jboolean, KinectDevice, nativeStart)(JNIEnv *env, jobject obj, jlong 
 /**
  * Start streaming with specific frame types.
  *
- * @param handle native pointer to libfreenect2::Freenect2Device
+ * @param handle native pointer to DeviceContext
  * @param typeMask bitmask of frame types
  * @return true if successful
  */
 JNI_METHOD(jboolean, KinectDevice, nativeStartWithTypes)(JNIEnv *env, jobject obj, jlong handle, jint typeMask) {
-    // For now, just call nativeStart - we'll implement type filtering later
-    return Java_com_kinect_jni_KinectDevice_nativeStart(env, obj, handle);
+    if (handle == 0) {
+        throwRuntimeException(env, "Invalid device handle");
+        return JNI_FALSE;
+    }
+
+    try {
+        DeviceContext *ctx = getDeviceContext(handle);
+        if (ctx == nullptr || ctx->device == nullptr) {
+            throwRuntimeException(env, "Invalid device context");
+            return JNI_FALSE;
+        }
+
+        // Create frame listener with specified types
+        ctx->listener = new libfreenect2::SyncMultiFrameListener(static_cast<int>(typeMask));
+
+        ctx->device->setColorFrameListener(ctx->listener);
+        ctx->device->setIrAndDepthFrameListener(ctx->listener);
+
+        bool success = ctx->device->start();
+        return success ? JNI_TRUE : JNI_FALSE;
+    } catch (const std::exception &e) {
+        throwRuntimeException(env, e.what());
+        return JNI_FALSE;
+    }
 }
 
 /**
  * Stop streaming.
  *
- * @param handle native pointer to libfreenect2::Freenect2Device
+ * @param handle native pointer to DeviceContext
  */
 JNI_METHOD(void, KinectDevice, nativeStop)(JNIEnv *env, jobject obj, jlong handle) {
     if (handle == 0) {
@@ -279,8 +416,19 @@ JNI_METHOD(void, KinectDevice, nativeStop)(JNIEnv *env, jobject obj, jlong handl
     }
 
     try {
-        libfreenect2::Freenect2Device *device = reinterpret_cast<libfreenect2::Freenect2Device*>(handle);
-        device->stop();
+        DeviceContext *ctx = getDeviceContext(handle);
+        if (ctx == nullptr || ctx->device == nullptr) {
+            throwRuntimeException(env, "Invalid device context");
+            return;
+        }
+
+        ctx->device->stop();
+
+        // Clean up listener
+        if (ctx->listener != nullptr) {
+            delete ctx->listener;
+            ctx->listener = nullptr;
+        }
     } catch (const std::exception &e) {
         throwRuntimeException(env, e.what());
     }
@@ -288,17 +436,63 @@ JNI_METHOD(void, KinectDevice, nativeStop)(JNIEnv *env, jobject obj, jlong handl
 
 /**
  * Get next frame from device.
- * PLACEHOLDER - full implementation requires frame listener management
  *
- * @param handle native pointer to libfreenect2::Freenect2Device
+ * @param handle native pointer to DeviceContext
  * @param frameType frame type to retrieve
  * @param timeoutMs timeout in milliseconds
- * @return Frame object
+ * @return Frame object, or null on timeout
  */
 JNI_METHOD(jobject, KinectDevice, nativeGetNextFrame)(JNIEnv *env, jobject obj, jlong handle, jint frameType, jlong timeoutMs) {
-    // Placeholder - full implementation requires frame management
-    throwRuntimeException(env, "nativeGetNextFrame not yet fully implemented");
-    return nullptr;
+    if (handle == 0) {
+        throwRuntimeException(env, "Invalid device handle");
+        return nullptr;
+    }
+
+    try {
+        DeviceContext *ctx = getDeviceContext(handle);
+        if (ctx == nullptr || ctx->device == nullptr || ctx->listener == nullptr) {
+            throwRuntimeException(env, "Invalid device context or not streaming");
+            return nullptr;
+        }
+
+        // Wait for new frame set
+        libfreenect2::FrameMap frames;
+        bool gotFrames = ctx->listener->waitForNewFrame(frames, static_cast<int>(timeoutMs));
+
+        if (!gotFrames) {
+            // Timeout - return null
+            return nullptr;
+        }
+
+        // Get the specific frame type
+        libfreenect2::Frame *frame = frames[static_cast<libfreenect2::Frame::Type>(frameType)];
+        if (frame == nullptr) {
+            ctx->listener->release(frames);
+            return nullptr;
+        }
+
+        // Create a copy of the frame (we need to own it after releasing the frame map)
+        libfreenect2::Frame *frameCopy = new libfreenect2::Frame(
+            frame->width, frame->height, frame->bytes_per_pixel, frame->data);
+        frameCopy->timestamp = frame->timestamp;
+        frameCopy->sequence = frame->sequence;
+        frameCopy->exposure = frame->exposure;
+        frameCopy->gain = frame->gain;
+        frameCopy->gamma = frame->gamma;
+        frameCopy->status = frame->status;
+        frameCopy->format = frame->format;
+
+        // Release the frame map back to the listener
+        ctx->listener->release(frames);
+
+        // Create Java Frame object
+        jobject javaFrame = createJavaFrame(env, frameCopy, frameType);
+
+        return javaFrame;
+    } catch (const std::exception &e) {
+        throwRuntimeException(env, e.what());
+        return nullptr;
+    }
 }
 
 // ============================================================================
@@ -307,25 +501,40 @@ JNI_METHOD(jobject, KinectDevice, nativeGetNextFrame)(JNIEnv *env, jobject obj, 
 
 /**
  * Get frame data as a direct ByteBuffer.
- * PLACEHOLDER
  *
  * @param handle native pointer to libfreenect2::Frame
  * @return direct ByteBuffer
  */
 JNI_METHOD(jobject, Frame, nativeGetFrameData)(JNIEnv *env, jobject obj, jlong handle) {
-    // Placeholder
-    throwRuntimeException(env, "nativeGetFrameData not yet fully implemented");
-    return nullptr;
+    if (handle == 0) {
+        throwRuntimeException(env, "Invalid frame handle");
+        return nullptr;
+    }
+
+    try {
+        libfreenect2::Frame *frame = reinterpret_cast<libfreenect2::Frame*>(handle);
+
+        // Create direct ByteBuffer pointing to frame data
+        size_t dataSize = frame->width * frame->height * frame->bytes_per_pixel;
+        jobject byteBuffer = env->NewDirectByteBuffer(frame->data, dataSize);
+
+        return byteBuffer;
+    } catch (const std::exception &e) {
+        throwRuntimeException(env, e.what());
+        return nullptr;
+    }
 }
 
 /**
  * Release a frame.
- * PLACEHOLDER
  *
  * @param handle native pointer to libfreenect2::Frame
  */
 JNI_METHOD(void, Frame, nativeReleaseFrame)(JNIEnv *env, jobject obj, jlong handle) {
-    // Placeholder - will be implemented with frame listener management
+    if (handle != 0) {
+        libfreenect2::Frame *frame = reinterpret_cast<libfreenect2::Frame*>(handle);
+        delete frame;
+    }
 }
 
 // ============================================================================
@@ -334,7 +543,6 @@ JNI_METHOD(void, Frame, nativeReleaseFrame)(JNIEnv *env, jobject obj, jlong hand
 
 /**
  * Destroy registration object.
- * PLACEHOLDER
  *
  * @param handle native pointer to libfreenect2::Registration
  */

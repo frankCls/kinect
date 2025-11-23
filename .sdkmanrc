@@ -1,0 +1,4 @@
+# Enable auto-env through the sdkman_auto_env config
+# To enable: sdk config sdkman_auto_env true
+java=17.0.9-amzn
+maven=3.6.3
