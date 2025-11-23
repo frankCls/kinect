@@ -99,10 +99,30 @@
                                     <arg value="${project.build.directory}/libkinect-jni.dylib"/>
                                     <arg value="${project.build.directory}/objs/Freenect2JNI.o"/>
                                 </exec>
+
+                                <!-- Fix rpath to use absolute path for libfreenect2 -->
+                                <exec executable="install_name_tool" failonerror="true">
+                                    <arg value="-change"/>
+                                    <arg value="@rpath/libfreenect2.0.2.dylib"/>
+                                    <arg value="${freenect2.lib}/libfreenect2.0.2.dylib"/>
+                                    <arg value="${project.build.directory}/libkinect-jni.dylib"/>
+                                </exec>
                             </target>
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+
+            <!-- Surefire Plugin: Configure test execution with native library path -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <java.library.path>${project.build.directory}${path.separator}${freenect2.lib}</java.library.path>
+                    </systemPropertyVariables>
+                    <argLine>-Djava.library.path=${project.build.directory}${path.separator}${freenect2.lib}</argLine>
+                </configuration>
             </plugin>
 
             <!-- JAR Plugin -->

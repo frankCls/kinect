@@ -27,6 +27,11 @@
 #define JNI_METHOD(return_type, class_name, method_name) \
     JNIEXPORT return_type JNICALL Java_com_kinect_jni_##class_name##_##method_name
 
+// Start of extern "C" block for JNI functions
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Structure to hold device state including frame listener
 struct DeviceContext {
     libfreenect2::Freenect2Device *device;
@@ -260,12 +265,43 @@ JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlon
             serialStr = freenect2->getDefaultDeviceSerialNumber();
         }
 
-        // Open device with OpenCL pipeline (best performance on macOS)
-        libfreenect2::Freenect2Device *device = freenect2->openDevice(serialStr);
-        if (device == nullptr) {
-            throwRuntimeException(env, "Failed to open device");
+        // Log debug info
+        fprintf(stderr, "[JNI] nativeOpenDevice: Device serial = %s\n", serialStr.c_str());
+        fflush(stderr);
+
+        // Check if serial is empty (no device available)
+        if (serialStr.empty()) {
+            fprintf(stderr, "[JNI] ERROR: No device found (empty serial)\n");
+            fflush(stderr);
+            throwRuntimeException(env, "No Kinect device found");
             return 0;
         }
+
+        // Create OpenGL pipeline (same as Protonect uses - verified working)
+        fprintf(stderr, "[JNI] Creating OpenGL pipeline...\n");
+        fflush(stderr);
+        libfreenect2::PacketPipeline *pipeline = new libfreenect2::OpenGLPacketPipeline();
+        fprintf(stderr, "[JNI] OpenGL pipeline created\n");
+        fflush(stderr);
+
+        // Open device with OpenGL pipeline
+        fprintf(stderr, "[JNI] Opening device...\n");
+        fflush(stderr);
+        libfreenect2::Freenect2Device *device = freenect2->openDevice(serialStr, pipeline);
+        
+        fprintf(stderr, "[JNI] openDevice() returned (device=%p)\n", device);
+        fflush(stderr);
+
+        if (device == nullptr) {
+            fprintf(stderr, "[JNI] ERROR: Failed to open device (returned nullptr)\n");
+            fflush(stderr);
+            delete pipeline;
+            throwRuntimeException(env, "Failed to open device (device not found or in use)");
+            return 0;
+        }
+
+        fprintf(stderr, "[JNI] Device opened successfully\n");
+        fflush(stderr);
 
         // Create device context
         DeviceContext *ctx = new DeviceContext(device);
@@ -277,12 +313,23 @@ JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlon
             deviceRegistry[handle] = ctx;
         }
 
+        fprintf(stderr, "[JNI] Device initialized and registered (handle=%lx)\n", handle);
+        fflush(stderr);
+
         return handle;
     } catch (const std::exception &e) {
-        throwRuntimeException(env, e.what());
+        fprintf(stderr, "[JNI] EXCEPTION: %s\n", e.what());
+        fflush(stderr);
+        throwRuntimeException(env, (std::string("Device open exception: ") + e.what()).c_str());
+        return 0;
+    } catch (...) {
+        fprintf(stderr, "[JNI] UNKNOWN EXCEPTION in nativeOpenDevice\n");
+        fflush(stderr);
+        throwRuntimeException(env, "Unknown exception opening device");
         return 0;
     }
 }
+
 
 /**
  * Close a Kinect device.
@@ -552,3 +599,8 @@ JNI_METHOD(void, Registration, nativeDestroyRegistration)(JNIEnv *env, jobject o
         delete registration;
     }
 }
+
+// End of extern "C" block
+#ifdef __cplusplus
+}
+#endif
