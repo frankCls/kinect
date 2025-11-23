@@ -193,12 +193,18 @@ jobject createJavaFrame(JNIEnv *env, libfreenect2::Frame *frame, int frameTypeVa
     // Find Frame class and constructor
     jclass frameClass = env->FindClass("com/kinect/jni/Frame");
     if (frameClass == nullptr) {
+        fprintf(stderr, "[JNI] ERROR: Failed to find Frame class\n");
+        fflush(stderr);
+        env->ExceptionDescribe();
         return nullptr;
     }
 
     // Find FrameType enum
     jclass frameTypeClass = env->FindClass("com/kinect/jni/FrameType");
     if (frameTypeClass == nullptr) {
+        fprintf(stderr, "[JNI] ERROR: Failed to find FrameType class\n");
+        fflush(stderr);
+        env->ExceptionDescribe();
         return nullptr;
     }
 
@@ -206,13 +212,24 @@ jobject createJavaFrame(JNIEnv *env, libfreenect2::Frame *frame, int frameTypeVa
     jmethodID fromNativeValueMethod = env->GetStaticMethodID(
         frameTypeClass, "fromNativeValue", "(I)Lcom/kinect/jni/FrameType;");
     if (fromNativeValueMethod == nullptr) {
+        fprintf(stderr, "[JNI] ERROR: Failed to find fromNativeValue method\n");
+        fflush(stderr);
+        env->ExceptionDescribe();
         return nullptr;
     }
 
     // Get FrameType enum instance
     jobject frameType = env->CallStaticObjectMethod(
         frameTypeClass, fromNativeValueMethod, frameTypeValue);
+    if (env->ExceptionCheck()) {
+        fprintf(stderr, "[JNI] ERROR: Exception calling fromNativeValue\n");
+        fflush(stderr);
+        env->ExceptionDescribe();
+        return nullptr;
+    }
     if (frameType == nullptr) {
+        fprintf(stderr, "[JNI] ERROR: fromNativeValue returned null\n");
+        fflush(stderr);
         return nullptr;
     }
 
@@ -221,12 +238,19 @@ jobject createJavaFrame(JNIEnv *env, libfreenect2::Frame *frame, int frameTypeVa
     //       int bytesPerPixel, long timestamp, long sequence)
     jmethodID frameConstructor = env->GetMethodID(
         frameClass, "<init>",
-        "(JLcom/kinect/jni/FrameType;IIJJ)V");
+        "(JLcom/kinect/jni/FrameType;IIIJJ)V");
     if (frameConstructor == nullptr) {
+        fprintf(stderr, "[JNI] ERROR: Failed to find Frame constructor with signature (JLcom/kinect/jni/FrameType;IIIJJ)V\n");
+        fflush(stderr);
+        env->ExceptionDescribe();
         return nullptr;
     }
 
     // Create Frame object
+    fprintf(stderr, "[JNI] Creating Frame: width=%d, height=%d, bpp=%d, ts=%ld, seq=%ld\n",
+            frame->width, frame->height, frame->bytes_per_pixel, frame->timestamp, frame->sequence);
+    fflush(stderr);
+
     jobject javaFrame = env->NewObject(
         frameClass, frameConstructor,
         reinterpret_cast<jlong>(frame),
@@ -238,6 +262,21 @@ jobject createJavaFrame(JNIEnv *env, libfreenect2::Frame *frame, int frameTypeVa
         static_cast<jlong>(frame->sequence)
     );
 
+    if (env->ExceptionCheck()) {
+        fprintf(stderr, "[JNI] ERROR: Exception creating Frame object\n");
+        fflush(stderr);
+        env->ExceptionDescribe();
+        return nullptr;
+    }
+
+    if (javaFrame == nullptr) {
+        fprintf(stderr, "[JNI] ERROR: NewObject returned null\n");
+        fflush(stderr);
+        return nullptr;
+    }
+
+    fprintf(stderr, "[JNI] Frame object created successfully\n");
+    fflush(stderr);
     return javaFrame;
 }
 
