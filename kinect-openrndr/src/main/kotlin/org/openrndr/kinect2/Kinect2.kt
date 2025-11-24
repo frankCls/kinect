@@ -423,16 +423,16 @@ abstract class Kinect2Camera(
 class Kinect2DepthCamera : Kinect2Camera(
     width = 512,
     height = 424,
-    colorFormat = ColorFormat.R,
-    colorType = ColorType.UINT8,  // Using UINT8 for better grayscale visualization
-    bytesPerPixel = 1  // UINT8 = 1 byte
+    colorFormat = ColorFormat.RGBa,  // Using RGBa for proper grayscale display
+    colorType = ColorType.UINT8,
+    bytesPerPixel = 4  // RGBa = 4 bytes (R, G, B, A)
 ) {
     private val logger = LoggerFactory.getLogger(Kinect2DepthCamera::class.java)
 
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
         val data = frame.data
 
-        // Convert 16-bit depth to normalized grayscale
+        // Convert 16-bit depth to grayscale visualization
         // Kinect V2 depth range: 500-4500mm (0.5m to 4.5m)
         val minDepth = 500f
         val maxDepth = 4500f
@@ -452,14 +452,18 @@ class Kinect2DepthCamera : Kinect2Camera(
 
                 // Normalize depth to 0-255 range for grayscale visualization
                 // Closer objects = darker, farther objects = brighter
-                val normalized = if (depthMm in minDepth.toInt()..maxDepth.toInt()) {
+                val grayValue = if (depthMm in minDepth.toInt()..maxDepth.toInt()) {
                     ((depthMm - minDepth) / (maxDepth - minDepth) * 255f).toInt().toByte()
                 } else {
                     0.toByte()  // Black for invalid/out-of-range depths
                 }
 
-                buffer.position(dstIdx)
-                buffer.put(normalized)
+                // Write as RGBa (replicate gray value to R, G, B channels)
+                buffer.position(dstIdx * 4)
+                buffer.put(grayValue)  // R
+                buffer.put(grayValue)  // G
+                buffer.put(grayValue)  // B
+                buffer.put(255.toByte())  // A (fully opaque)
             }
         }
     }
@@ -503,22 +507,27 @@ class Kinect2ColorCamera : Kinect2Camera(
 class Kinect2IRCamera : Kinect2Camera(
     width = 512,
     height = 424,
-    colorFormat = ColorFormat.R,
-    colorType = ColorType.FLOAT16,
-    bytesPerPixel = 2  // FLOAT16 = 2 bytes
+    colorFormat = ColorFormat.RGBa,  // Using RGBa for proper grayscale display
+    colorType = ColorType.UINT8,
+    bytesPerPixel = 4  // RGBa = 4 bytes
 ) {
     private val logger = LoggerFactory.getLogger(Kinect2IRCamera::class.java)
 
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
         val data = frame.data
 
-        // Convert 16-bit IR to normalized float
+        // Convert 16-bit IR to grayscale
         // Kinect V2 IR range: 0-65535
         data.position(0)
         for (i in 0 until width * height) {
             val ir = data.int and 0xFFFF  // Read as unsigned 16-bit
-            val normalized = ir / 65535f
-            buffer.putShort((normalized * 65535f).toInt().toShort())
+            val grayValue = (ir / 65535f * 255f).toInt().toByte()
+
+            // Write as RGBa (replicate gray value to R, G, B channels)
+            buffer.put(grayValue)  // R
+            buffer.put(grayValue)  // G
+            buffer.put(grayValue)  // B
+            buffer.put(255.toByte())  // A (fully opaque)
         }
     }
 }
