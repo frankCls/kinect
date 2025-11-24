@@ -36,6 +36,11 @@ public class KinectDevice implements AutoCloseable {
     private final String serial;
 
     /**
+     * Pipeline type used for this device.
+     */
+    private final PipelineType pipelineType;
+
+    /**
      * Track whether streaming is active.
      */
     private boolean streaming = false;
@@ -50,11 +55,16 @@ public class KinectDevice implements AutoCloseable {
      *
      * @param context parent context
      * @param serial device serial (null for default device)
+     * @param pipelineType packet pipeline type (CPU or OPENGL)
      */
-    KinectDevice(FreenectContext context, String serial) {
+    KinectDevice(FreenectContext context, String serial, PipelineType pipelineType) {
         this.context = context;
         this.serial = serial;
-        this.nativeHandle = nativeOpenDevice(context.getNativeHandle(), serial);
+        this.pipelineType = pipelineType;
+        this.nativeHandle = nativeOpenDevice(
+                context.getNativeHandle(),
+                serial,
+                pipelineType.getNativeValue());
         if (this.nativeHandle == 0) {
             throw new RuntimeException("Failed to open Kinect device: " +
                     (serial != null ? serial : "default"));
@@ -68,6 +78,15 @@ public class KinectDevice implements AutoCloseable {
      */
     public String getSerial() {
         return serial;
+    }
+
+    /**
+     * Get the pipeline type used for this device.
+     *
+     * @return pipeline type (CPU or OPENGL)
+     */
+    public PipelineType getPipelineType() {
+        return pipelineType;
     }
 
     /**
@@ -234,8 +253,8 @@ public class KinectDevice implements AutoCloseable {
 
     @Override
     public String toString() {
-        return String.format("KinectDevice{serial=%s, streaming=%b, closed=%b}",
-                serial, streaming, closed);
+        return String.format("KinectDevice{serial=%s, pipeline=%s, streaming=%b, closed=%b}",
+                serial, pipelineType, streaming, closed);
     }
 
     // Native method declarations
@@ -245,9 +264,10 @@ public class KinectDevice implements AutoCloseable {
      *
      * @param contextHandle native pointer to libfreenect2::Freenect2
      * @param serial device serial (null for default)
+     * @param pipelineType packet pipeline type (0 = CPU, 1 = OPENGL)
      * @return native pointer to libfreenect2::Freenect2Device, or 0 on failure
      */
-    private native long nativeOpenDevice(long contextHandle, String serial);
+    private native long nativeOpenDevice(long contextHandle, String serial, int pipelineType);
 
     /**
      * Close a Kinect device.

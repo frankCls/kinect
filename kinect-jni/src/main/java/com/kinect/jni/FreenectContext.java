@@ -78,7 +78,22 @@ public class FreenectContext implements AutoCloseable {
     }
 
     /**
+     * Open a Kinect device by serial number with specified pipeline type.
+     *
+     * @param serial device serial number (null for default device)
+     * @param pipelineType packet pipeline type (CPU or OPENGL)
+     * @return a KinectDevice instance
+     * @throws RuntimeException if device cannot be opened
+     * @throws IllegalStateException if context is closed
+     */
+    public KinectDevice openDevice(String serial, PipelineType pipelineType) {
+        checkNotClosed();
+        return new KinectDevice(this, serial, pipelineType);
+    }
+
+    /**
      * Open a Kinect device by serial number.
+     * Uses OpenGL pipeline by default for backward compatibility.
      *
      * @param serial device serial number (null for default device)
      * @return a KinectDevice instance
@@ -86,19 +101,31 @@ public class FreenectContext implements AutoCloseable {
      * @throws IllegalStateException if context is closed
      */
     public KinectDevice openDevice(String serial) {
-        checkNotClosed();
-        return new KinectDevice(this, serial);
+        return openDevice(serial, PipelineType.OPENGL);
+    }
+
+    /**
+     * Open the default Kinect device (first device found) with specified pipeline type.
+     *
+     * @param pipelineType packet pipeline type (CPU or OPENGL)
+     * @return a KinectDevice instance
+     * @throws RuntimeException if no devices found or device cannot be opened
+     * @throws IllegalStateException if context is closed
+     */
+    public KinectDevice openDefaultDevice(PipelineType pipelineType) {
+        return openDevice(null, pipelineType);
     }
 
     /**
      * Open the default Kinect device (first device found).
+     * Uses OpenGL pipeline by default for backward compatibility.
      *
      * @return a KinectDevice instance
      * @throws RuntimeException if no devices found or device cannot be opened
      * @throws IllegalStateException if context is closed
      */
     public KinectDevice openDefaultDevice() {
-        return openDevice(null);
+        return openDevice(null, PipelineType.OPENGL);
     }
 
     /**

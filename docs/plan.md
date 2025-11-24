@@ -36,7 +36,7 @@ Three-module Maven project with:
 
 4. Verify installation with Protonect test
    ```bash
-   $HOME/freenect2/bin/Protonect
+$HOME/freenect2/bin/Protonect
    ```
 
 **Success Criteria**:

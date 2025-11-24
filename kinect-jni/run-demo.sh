@@ -5,9 +5,11 @@
 # because OpenGL requires display context.
 #
 # Usage:
-#   ./run-demo.sh                    # Console only, 10 seconds, 30 frames
-#   ./run-demo.sh --gui              # With visual window
-#   ./run-demo.sh --duration 30      # Custom duration
+#   ./run-demo.sh                          # Console only, OpenGL pipeline (default)
+#   ./run-demo.sh --gui                    # With visual window
+#   ./run-demo.sh --pipeline CPU           # Use CPU pipeline (safe for frameworks)
+#   ./run-demo.sh --pipeline OPENGL        # Use OpenGL pipeline (faster, default)
+#   ./run-demo.sh --duration 30            # Custom duration
 #   ./run-demo.sh --gui --duration 20 --frames 50
 
 cd "$(dirname "$0")"

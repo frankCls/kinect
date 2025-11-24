@@ -433,11 +433,17 @@ class Kinect2DepthCamera : Kinect2Camera(
         val data = frame.data
 
         // Convert 16-bit depth to grayscale visualization
-        // Kinect V2 depth range: 500-4500mm (0.5m to 4.5m)
+        // Use full sensor range for better visualization
+        // Kinect V2 can report up to 8192mm (~8m), but useful range is 0.5-4.5m
         val minDepth = 500f
-        val maxDepth = 4500f
+        val maxDepth = 8000f  // Extended range for better visualization of far objects
 
         data.position(0)
+
+        // Debug: Sample some depth values
+        var validPixels = 0
+        var minFound = Float.MAX_VALUE
+        var maxFound = 0f
 
         // Read depth data and flip vertically (image is upside down from libfreenect2)
         for (y in 0 until height) {
@@ -445,17 +451,26 @@ class Kinect2DepthCamera : Kinect2Camera(
                 // Read from source (top-down)
                 val srcIdx = y * width + x
                 data.position(srcIdx * 4)  // 4 bytes per pixel in source (float depth)
-                val depthMm = (data.short.toInt() and 0xFFFF)  // Read as unsigned 16-bit
+                val depthMm = (data.short.toInt() and 0xFFFF).toFloat()  // Read as unsigned 16-bit
+
+                // Track stats for first frame
+                if (framesReceived == 1L && depthMm > 0) {
+                    validPixels++
+                    if (depthMm < minFound) minFound = depthMm
+                    if (depthMm > maxFound) maxFound = depthMm
+                }
 
                 // Write to destination (bottom-up for flip)
                 val dstIdx = (height - 1 - y) * width + x
 
                 // Normalize depth to 0-255 range for grayscale visualization
                 // Closer objects = darker, farther objects = brighter
-                val grayValue = if (depthMm in minDepth.toInt()..maxDepth.toInt()) {
+                val grayValue = if (depthMm >= minDepth && depthMm <= maxDepth) {
                     ((depthMm - minDepth) / (maxDepth - minDepth) * 255f).toInt().toByte()
+                } else if (depthMm > maxDepth) {
+                    255.toByte()  // White for very far objects
                 } else {
-                    0.toByte()  // Black for invalid/out-of-range depths
+                    0.toByte()  // Black for invalid/too close depths
                 }
 
                 // Write as RGBa (replicate gray value to R, G, B channels)
@@ -465,6 +480,11 @@ class Kinect2DepthCamera : Kinect2Camera(
                 buffer.put(grayValue)  // B
                 buffer.put(255.toByte())  // A (fully opaque)
             }
+        }
+
+        // Log depth range on first frame
+        if (framesReceived == 1L) {
+            logger.info("Depth statistics: $validPixels valid pixels, range: ${minFound}mm - ${maxFound}mm")
         }
     }
 }

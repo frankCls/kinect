@@ -73,6 +73,9 @@ fun main() = application {
             pipelineType = PipelineType.CPU
         }
 
+        // Track time for console output
+        var lastPrintTime = 0.0
+
         extend {
             drawer.clear(ColorRGBa.BLACK)
 
@@ -85,12 +88,14 @@ fun main() = application {
                 drawer.text("Frames: ${kinect.depthCamera.framesReceived}", 10.0, 20.0)
                 drawer.text("FPS: ${"%.1f".format(frameCount / seconds)}", 10.0, 40.0)
             } catch (@Suppress("SwallowedException") _: Exception) {
-                // Font not available, skip text rendering
+                // Font not available, skip text rendering silently
             }
 
-            // Alternative: Print stats to console every 30 frames
-            if (frameCount % 30 == 0) {
-                println("Frames: ${kinect.depthCamera.framesReceived}, FPS: ${"%.1f".format(frameCount / seconds)}")
+            // Print stats to console every second
+            if (seconds - lastPrintTime >= 1.0) {
+                lastPrintTime = seconds
+                val fps = if (seconds > 0) frameCount / seconds else 0.0
+                println("[${seconds.toInt()}s] Frames: ${kinect.depthCamera.framesReceived}, FPS: ${"%.1f".format(fps)}")
             }
         }
     }

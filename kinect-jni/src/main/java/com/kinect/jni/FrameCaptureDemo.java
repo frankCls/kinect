@@ -31,6 +31,7 @@ public class FrameCaptureDemo {
         boolean enableGui = false;
         int durationSeconds = 10;
         int frameCount = 30;
+        PipelineType pipelineType = PipelineType.OPENGL;  // Default to OpenGL
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
@@ -45,6 +46,12 @@ public class FrameCaptureDemo {
                 case "--frames":
                     if (i + 1 < args.length) {
                         frameCount = Integer.parseInt(args[++i]);
+                    }
+                    break;
+                case "--pipeline":
+                    if (i + 1 < args.length) {
+                        String pipeline = args[++i].toUpperCase();
+                        pipelineType = PipelineType.valueOf(pipeline);
                     }
                     break;
                 case "--help":
@@ -64,7 +71,7 @@ public class FrameCaptureDemo {
         System.out.println("libfreenect2 version: " + Freenect.getVersion());
 
         // Run capture session
-        CaptureSession session = new CaptureSession(enableGui, durationSeconds, frameCount);
+        CaptureSession session = new CaptureSession(enableGui, durationSeconds, frameCount, pipelineType);
         try {
             session.run();
         } catch (Exception e) {
@@ -78,13 +85,15 @@ public class FrameCaptureDemo {
         System.out.println("\nKinect V2 Frame Capture Demo");
         System.out.println("\nUsage: mvn exec:java -pl kinect-jni -Dexec.args=\"[OPTIONS]\"");
         System.out.println("\nOptions:");
-        System.out.println("  --gui              Enable visual window display");
-        System.out.println("  --duration <sec>   Capture duration in seconds (default: 10)");
-        System.out.println("  --frames <count>   Frames to capture per type (default: 30)");
-        System.out.println("  --help             Show this help message");
+        System.out.println("  --gui                Enable visual window display");
+        System.out.println("  --duration <sec>     Capture duration in seconds (default: 10)");
+        System.out.println("  --frames <count>     Frames to capture per type (default: 30)");
+        System.out.println("  --pipeline <type>    Pipeline type: CPU or OPENGL (default: OPENGL)");
+        System.out.println("  --help               Show this help message");
         System.out.println("\nExamples:");
         System.out.println("  mvn exec:java -pl kinect-jni");
         System.out.println("  mvn exec:java -pl kinect-jni -Dexec.args=\"--gui\"");
+        System.out.println("  mvn exec:java -pl kinect-jni -Dexec.args=\"--pipeline CPU\"");
         System.out.println("  mvn exec:java -pl kinect-jni -Dexec.args=\"--gui --duration 30\"");
     }
 
@@ -95,13 +104,15 @@ public class FrameCaptureDemo {
         private final boolean enableGui;
         private final int durationSeconds;
         private final int targetFrameCount;
+        private final PipelineType pipelineType;
         private final Map<FrameType, FrameStats> stats = new HashMap<>();
         private FrameDisplay display;
 
-        public CaptureSession(boolean enableGui, int durationSeconds, int targetFrameCount) {
+        public CaptureSession(boolean enableGui, int durationSeconds, int targetFrameCount, PipelineType pipelineType) {
             this.enableGui = enableGui;
             this.durationSeconds = durationSeconds;
             this.targetFrameCount = targetFrameCount;
+            this.pipelineType = pipelineType;
 
             // Initialize statistics
             stats.put(FrameType.COLOR, new FrameStats("COLOR", 1920, 1080));
@@ -126,8 +137,9 @@ public class FrameCaptureDemo {
                     display.show();
                 }
 
+                System.out.println("Pipeline type: " + pipelineType);
                 System.out.println("Opening device...");
-                try (KinectDevice device = context.openDefaultDevice()) {
+                try (KinectDevice device = context.openDefaultDevice(pipelineType)) {
                     System.out.println(ANSI_GREEN + "Device opened successfully" + ANSI_RESET);
                     System.out.println("Firmware version: " + device.getFirmwareVersion());
 
