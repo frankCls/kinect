@@ -79,10 +79,19 @@ fun main() = application {
             // Draw depth image
             drawer.image(kinect.depthCamera.currentFrame)
 
-            // Show frame count
-            drawer.fill = ColorRGBa.WHITE
-            drawer.text("Frames: ${kinect.depthCamera.framesReceived}", 10.0, 20.0)
-            drawer.text("FPS: ${"%.1f".format(frameCount / seconds)}", 10.0, 40.0)
+            // Show frame count and FPS (requires default font, may not display if font missing)
+            try {
+                drawer.fill = ColorRGBa.WHITE
+                drawer.text("Frames: ${kinect.depthCamera.framesReceived}", 10.0, 20.0)
+                drawer.text("FPS: ${"%.1f".format(frameCount / seconds)}", 10.0, 40.0)
+            } catch (@Suppress("SwallowedException") _: Exception) {
+                // Font not available, skip text rendering
+            }
+
+            // Alternative: Print stats to console every 30 frames
+            if (frameCount % 30 == 0) {
+                println("Frames: ${kinect.depthCamera.framesReceived}, FPS: ${"%.1f".format(frameCount / seconds)}")
+            }
         }
     }
 }
