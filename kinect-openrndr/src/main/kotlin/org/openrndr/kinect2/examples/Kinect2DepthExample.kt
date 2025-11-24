@@ -52,6 +52,7 @@ fun main() = application {
         width = 512
         height = 424
         title = "Kinect V2 - Depth Camera"
+        windowAlwaysOnTop = true  // Keep window visible for easier debugging
     }
 
     program {
@@ -73,7 +74,7 @@ fun main() = application {
             pipelineType = PipelineType.CPU
         }
 
-        // Track time for console output
+        // Track time for console output and window title updates
         var lastPrintTime = 0.0
 
         extend {
@@ -82,19 +83,13 @@ fun main() = application {
             // Draw depth image
             drawer.image(kinect.depthCamera.currentFrame)
 
-            // Show frame count and FPS (requires default font, may not display if font missing)
-            try {
-                drawer.fill = ColorRGBa.WHITE
-                drawer.text("Frames: ${kinect.depthCamera.framesReceived}", 10.0, 20.0)
-                drawer.text("FPS: ${"%.1f".format(frameCount / seconds)}", 10.0, 40.0)
-            } catch (@Suppress("SwallowedException") _: Exception) {
-                // Font not available, skip text rendering silently
-            }
+            // Update window title with FPS (works without font!)
+            val fps = if (seconds > 0) frameCount / seconds else 0.0
+            window.title = "Kinect V2 Depth | Frames: ${kinect.depthCamera.framesReceived} | FPS: ${"%.1f".format(fps)}"
 
             // Print stats to console every second
             if (seconds - lastPrintTime >= 1.0) {
                 lastPrintTime = seconds
-                val fps = if (seconds > 0) frameCount / seconds else 0.0
                 println("[${seconds.toInt()}s] Frames: ${kinect.depthCamera.framesReceived}, FPS: ${"%.1f".format(fps)}")
             }
         }

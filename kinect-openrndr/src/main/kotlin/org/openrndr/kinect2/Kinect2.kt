@@ -464,13 +464,15 @@ class Kinect2DepthCamera : Kinect2Camera(
                 val dstIdx = (height - 1 - y) * width + x
 
                 // Normalize depth to 0-255 range for grayscale visualization
-                // Closer objects = darker, farther objects = brighter
+                // INVERTED: Closer objects = brighter (white), farther objects = darker (black)
+                // This is more intuitive - you see nearby objects clearly
                 val grayValue = if (depthMm >= minDepth && depthMm <= maxDepth) {
-                    ((depthMm - minDepth) / (maxDepth - minDepth) * 255f).toInt().toByte()
-                } else if (depthMm > maxDepth) {
-                    255.toByte()  // White for very far objects
+                    // Invert the mapping: close = 255 (white), far = 0 (black)
+                    (255f - ((depthMm - minDepth) / (maxDepth - minDepth) * 255f)).toInt().toByte()
+                } else if (depthMm > 0 && depthMm < minDepth) {
+                    255.toByte()  // White for very close objects
                 } else {
-                    0.toByte()  // Black for invalid/too close depths
+                    0.toByte()  // Black for invalid/too far depths
                 }
 
                 // Write as RGBa (replicate gray value to R, G, B channels)
