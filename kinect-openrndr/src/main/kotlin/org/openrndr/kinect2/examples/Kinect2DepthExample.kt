@@ -74,23 +74,20 @@ fun main() = application {
             pipelineType = PipelineType.CPU
         }
 
-        // Track time for console output and window title updates
+        // Track time for console output
         var lastPrintTime = 0.0
 
         extend {
             drawer.clear(ColorRGBa.BLACK)
 
-            // Draw depth image
+            // Draw depth image (fills entire window)
             drawer.image(kinect.depthCamera.currentFrame)
 
-            // Update window title with FPS (works without font!)
-            val fps = if (seconds > 0) frameCount / seconds else 0.0
-            window.title = "Kinect V2 Depth | Frames: ${kinect.depthCamera.framesReceived} | FPS: ${"%.1f".format(fps)}"
-
-            // Print stats to console every second
+            // Print comprehensive stats to console every second
             if (seconds - lastPrintTime >= 1.0) {
                 lastPrintTime = seconds
-                println("[${seconds.toInt()}s] Frames: ${kinect.depthCamera.framesReceived}, FPS: ${"%.1f".format(fps)}")
+                val fps = if (seconds > 0) frameCount / seconds else 0.0
+                println("═══ [${seconds.toInt()}s] Frames: ${kinect.depthCamera.framesReceived} | FPS: ${"%.1f".format(fps)} | Timestamp: ${kinect.depthCamera.lastTimestamp}ms ═══")
             }
         }
     }

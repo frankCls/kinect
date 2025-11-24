@@ -432,61 +432,47 @@ class Kinect2DepthCamera : Kinect2Camera(
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
         val data = frame.data
 
-        // Convert 16-bit depth to grayscale visualization
-        // Use full sensor range for better visualization
-        // Kinect V2 can report up to 8192mm (~8m), but useful range is 0.5-4.5m
-        val minDepth = 500f
-        val maxDepth = 8000f  // Extended range for better visualization of far objects
+        // Use practical depth range for Kinect V2
+        // Sensor reports 500-4500mm reliable range, but we'll use wider for better visualization
+        val minDepth = 500f   // 0.5m - anything closer is invalid/noise
+        val maxDepth = 5000f  // 5m - good practical range for indoor scenes
+        val range = maxDepth - minDepth
 
         data.position(0)
 
-        // Debug: Sample some depth values
-        var validPixels = 0
-        var minFound = Float.MAX_VALUE
-        var maxFound = 0f
-
-        // Read depth data and flip vertically (image is upside down from libfreenect2)
+        // Convert to grayscale
         for (y in 0 until height) {
             for (x in 0 until width) {
-                // Read from source (top-down)
                 val srcIdx = y * width + x
-                data.position(srcIdx * 4)  // 4 bytes per pixel in source (float depth)
-                val depthMm = (data.short.toInt() and 0xFFFF).toFloat()  // Read as unsigned 16-bit
+                data.position(srcIdx * 4)
+                val depthMm = (data.short.toInt() and 0xFFFF).toFloat()
 
-                // Track stats for first frame
-                if (framesReceived == 1L && depthMm > 0) {
-                    validPixels++
-                    if (depthMm < minFound) minFound = depthMm
-                    if (depthMm > maxFound) maxFound = depthMm
-                }
-
-                // Write to destination (bottom-up for flip)
+                // Write to destination (bottom-up for vertical flip)
                 val dstIdx = (height - 1 - y) * width + x
 
-                // Normalize depth to 0-255 range for grayscale visualization
-                // INVERTED: Closer objects = brighter (white), farther objects = darker (black)
-                // This is more intuitive - you see nearby objects clearly
-                val grayValue = if (depthMm >= minDepth && depthMm <= maxDepth) {
-                    // Invert the mapping: close = 255 (white), far = 0 (black)
-                    (255f - ((depthMm - minDepth) / (maxDepth - minDepth) * 255f)).toInt().toByte()
-                } else if (depthMm > 0 && depthMm < minDepth) {
-                    255.toByte()  // White for very close objects
-                } else {
-                    0.toByte()  // Black for invalid/too far depths
+                // Map depth to grayscale
+                // Close = bright (255), far = dark (0)
+                val grayValue = when {
+                    depthMm < minDepth -> 255.toByte()  // Very close = white
+                    depthMm > maxDepth -> 0.toByte()     // Very far = black
+                    else -> {
+                        val normalized = ((depthMm - minDepth) / range).coerceIn(0f, 1f)
+                        (255f * (1f - normalized)).toInt().toByte()
+                    }
                 }
 
-                // Write as RGBa (replicate gray value to R, G, B channels)
+                // Write as RGBa
                 buffer.position(dstIdx * 4)
                 buffer.put(grayValue)  // R
                 buffer.put(grayValue)  // G
                 buffer.put(grayValue)  // B
-                buffer.put(255.toByte())  // A (fully opaque)
+                buffer.put(255.toByte())  // A
             }
         }
 
-        // Log depth range on first frame
+        // Log stats on first frame
         if (framesReceived == 1L) {
-            logger.info("Depth statistics: $validPixels valid pixels, range: ${minFound}mm - ${maxFound}mm")
+            logger.info("Using fixed depth range: ${minDepth.toInt()}mm - ${maxDepth.toInt()}mm for visualization")
         }
     }
 }
