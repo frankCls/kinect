@@ -391,22 +391,49 @@ abstract class Kinect2Camera(
 
 /**
  * Depth camera (512x424, 16-bit depth values in millimeters).
- * Converts to grayscale ColorBuffer for visualization.
+ *
+ * **What You Should See:**
+ * - **Grayscale depth map** where brightness represents distance from the camera
+ * - **Black pixels**: Objects very close to camera (< 500mm / 0.5m) or invalid depth readings
+ * - **Dark gray**: Objects close to camera (around 500-1500mm / 0.5-1.5m)
+ * - **Medium gray**: Objects at mid-range (around 1500-3000mm / 1.5-3m)
+ * - **Light gray/White**: Objects far from camera (3000-4500mm / 3-4.5m)
+ * - **Black**: Background/objects beyond 4500mm (4.5m) or areas with no depth data
+ *
+ * **Kinect V2 Depth Specifications:**
+ * - Resolution: 512x424 pixels
+ * - Depth range: 500mm (0.5m) to 4500mm (4.5m)
+ * - Accuracy: ±0.5% at 500mm, ±2% at 4500mm
+ * - Field of view: 70.6° horizontal, 60° vertical
+ * - Frame rate: 30 FPS
+ *
+ * **Common Visualization Issues:**
+ * - If you see **red dots** instead of grayscale: This may indicate the ColorBuffer format
+ *   is being interpreted incorrectly. The depth data is single-channel (R) grayscale.
+ * - If **everything appears very dark**: Most objects in view are close to the camera (< 1m).
+ *   Try moving objects or the camera to see the full depth range.
+ * - If you see **black regions**: These are areas with no valid depth reading (too close,
+ *   too far, or infrared-absorbing surfaces like black velvet).
+ *
+ * **Technical Details:**
+ * - Converts 16-bit depth values (mm) to normalized 0-1 range for visualization
+ * - Applies vertical flip to correct libfreenect2's upside-down image orientation
+ * - Uses FLOAT16 ColorBuffer format for efficient GPU storage
  */
 class Kinect2DepthCamera : Kinect2Camera(
     width = 512,
     height = 424,
     colorFormat = ColorFormat.R,
-    colorType = ColorType.FLOAT16,
-    bytesPerPixel = 2  // FLOAT16 = 2 bytes
+    colorType = ColorType.UINT8,  // Using UINT8 for better grayscale visualization
+    bytesPerPixel = 1  // UINT8 = 1 byte
 ) {
     private val logger = LoggerFactory.getLogger(Kinect2DepthCamera::class.java)
 
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
         val data = frame.data
 
-        // Convert 16-bit depth to normalized float
-        // Kinect V2 depth range: 500-4500mm
+        // Convert 16-bit depth to normalized grayscale
+        // Kinect V2 depth range: 500-4500mm (0.5m to 4.5m)
         val minDepth = 500f
         val maxDepth = 4500f
 
@@ -422,13 +449,17 @@ class Kinect2DepthCamera : Kinect2Camera(
 
                 // Write to destination (bottom-up for flip)
                 val dstIdx = (height - 1 - y) * width + x
-                val normalized = if (depthMm > 0) {
-                    ((depthMm - minDepth) / (maxDepth - minDepth)).coerceIn(0f, 1f)
+
+                // Normalize depth to 0-255 range for grayscale visualization
+                // Closer objects = darker, farther objects = brighter
+                val normalized = if (depthMm in minDepth.toInt()..maxDepth.toInt()) {
+                    ((depthMm - minDepth) / (maxDepth - minDepth) * 255f).toInt().toByte()
                 } else {
-                    0f
+                    0.toByte()  // Black for invalid/out-of-range depths
                 }
-                buffer.position(dstIdx * 2)  // 2 bytes per pixel in destination (FLOAT16)
-                buffer.putShort((normalized * 65535f).toInt().toShort())
+
+                buffer.position(dstIdx)
+                buffer.put(normalized)
             }
         }
     }
