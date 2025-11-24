@@ -10,12 +10,42 @@ import com.kinect.jni.PipelineType
  * Simple example showing only the depth camera from Kinect V2.
  *
  * This is the minimal example to get started with Kinect V2 in OPENRNDR.
- * Displays a grayscale depth image where closer objects are brighter.
+ * Displays a 512x424 grayscale depth image in real-time.
+ *
+ * ## What You Should See:
+ *
+ * A **grayscale depth map** where pixel brightness represents distance from the camera:
+ *
+ * - **Black pixels**: Objects very close to camera (< 0.5m) or invalid/no depth data
+ * - **Dark gray**: Objects close to camera (0.5m - 1.5m range)
+ * - **Medium gray**: Objects at mid-range (1.5m - 3m)
+ * - **Light gray to white**: Objects far from camera (3m - 4.5m)
+ * - **Black background**: Areas beyond 4.5m or infrared-absorbing surfaces
+ *
+ * ### Example Visualization:
+ * - Hold your hand 0.5m from Kinect → appears **very dark gray**
+ * - Stand 2m from Kinect → torso appears **medium gray**
+ * - Wall 4m away → appears **light gray/white**
+ *
+ * ### Frame Rate Information:
+ * - Top-left shows frame count and FPS (should be ~30 FPS)
+ * - Expect smooth motion with no lag at 30 FPS
+ *
+ * ### Troubleshooting:
+ * - **Red dots instead of grayscale**: Color format issue (fixed in latest version)
+ * - **All black**: Kinect not connected or USB 3.0 issue
+ * - **Very dark image**: All objects in view are close (< 1m) - step back
+ * - **Choppy/low FPS**: USB 3.0 bandwidth issue - disconnect other devices
  *
  * Requirements:
  * - Kinect V2 hardware connected via USB 3.0
  * - libfreenect2 installed at ~/freenect2
  * - Native library path configured
+ *
+ * Run with:
+ * ```
+ * ./run-example.sh depth
+ * ```
  */
 fun main() = application {
     configure {

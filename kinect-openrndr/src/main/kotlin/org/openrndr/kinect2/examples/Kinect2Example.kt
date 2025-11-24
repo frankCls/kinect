@@ -7,10 +7,48 @@ import org.openrndr.kinect2.Kinect2Manager
 import com.kinect.jni.PipelineType
 
 /**
- * Basic example demonstrating Kinect V2 integration with OPENRNDR.
+ * Complete example demonstrating all Kinect V2 streams with OPENRNDR.
  *
- * This example displays depth, color, and infrared streams from a Kinect V2 device.
- * The three streams are arranged side-by-side in the window.
+ * This example displays depth, color, and infrared streams side-by-side from a Kinect V2 device.
+ * The three streams are arranged horizontally: DEPTH | COLOR | INFRARED
+ *
+ * ## What You Should See:
+ *
+ * ### LEFT: Depth Camera (512x424)
+ * - **Grayscale depth map** where brightness = distance from camera
+ * - Black: Very close (< 0.5m) or no data
+ * - Dark gray: Close range (0.5-1.5m)
+ * - Medium gray: Mid-range (1.5-3m)
+ * - Light gray/White: Far range (3-4.5m)
+ *
+ * ### CENTER: Color Camera (1920x1080, scaled to fit)
+ * - **Full RGB color video** from the Kinect's 1080p camera
+ * - Natural color reproduction
+ * - Should show your environment in full color
+ * - Wider field of view than depth camera
+ *
+ * ### RIGHT: Infrared Camera (512x424)
+ * - **Grayscale IR intensity** from the active IR illuminator
+ * - Shows the raw infrared pattern projected by Kinect
+ * - Brighter areas = stronger IR reflection
+ * - Works in complete darkness
+ * - Shows texture and patterns invisible to RGB camera
+ *
+ * ### Bottom Statistics:
+ * - Frame counts for each stream (should all increase steadily)
+ * - All three streams run at ~30 FPS independently
+ *
+ * ### Expected Behavior:
+ * - All three streams update smoothly at 30 FPS
+ * - Depth and IR are synchronized (same camera, different data)
+ * - Color stream has slight offset (different physical camera)
+ * - No frame drops or stuttering under normal conditions
+ *
+ * ### Troubleshooting:
+ * - **Black windows**: Check Kinect connection and USB 3.0
+ * - **Missing color**: Ensure good lighting for RGB camera
+ * - **Low FPS**: USB 3.0 bandwidth issue - close other USB devices
+ * - **Misaligned streams**: Normal - depth and color cameras are physically offset
  *
  * Requirements:
  * - Kinect V2 hardware connected via USB 3.0
@@ -18,6 +56,10 @@ import com.kinect.jni.PipelineType
  * - Native library path configured: -Djava.library.path=kinect-jni/target:$HOME/freenect2/lib
  *
  * Run with:
+ * ```
+ * ./run-example.sh all
+ * ```
+ * or
  * ```
  * mvn exec:java -Dexec.mainClass="org.openrndr.kinect2.examples.Kinect2ExampleKt" \
  *     -Dexec.classpathScope=compile \
