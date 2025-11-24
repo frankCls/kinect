@@ -19,6 +19,7 @@
     <modules>
         <module>kinect-jni</module>
         <module>kinect-core</module>
+        <module>kinect-openrndr</module>
         <module>kinect-app</module>
     </modules>
 

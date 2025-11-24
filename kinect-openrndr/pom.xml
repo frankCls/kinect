@@ -1,0 +1,229 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.kinect</groupId>
+        <artifactId>kinect-parent</artifactId>
+        <version>1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>kinect-openrndr</artifactId>
+    <packaging>jar</packaging>
+
+    <name>Kinect V2 OPENRNDR Extension</name>
+    <description>
+        OPENRNDR extension for Kinect V2 integration.
+        Provides reactive frame streams and GPU-resident ColorBuffer integration.
+        Based on orx-kinect-v1 architecture for Kinect V2 hardware.
+    </description>
+
+    <properties>
+        <!-- OPENRNDR version -->
+        <openrndr.version>0.4.4</openrndr.version>
+    </properties>
+
+    <repositories>
+        <!-- OPENRNDR Maven repository -->
+        <repository>
+            <id>openrndr-releases</id>
+            <url>https://maven.openrndr.org/content/repositories/releases/</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <!-- Internal dependencies -->
+        <dependency>
+            <groupId>com.kinect</groupId>
+            <artifactId>kinect-jni</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.kinect</groupId>
+            <artifactId>kinect-core</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- OPENRNDR core -->
+        <dependency>
+            <groupId>org.openrndr</groupId>
+            <artifactId>openrndr-core</artifactId>
+            <version>${openrndr.version}</version>
+        </dependency>
+
+        <!-- OPENRNDR application (for Extension interface) -->
+        <dependency>
+            <groupId>org.openrndr</groupId>
+            <artifactId>openrndr-application-jvm</artifactId>
+            <version>${openrndr.version}</version>
+            <scope>compile</scope>
+        </dependency>
+
+        <!-- OPENRNDR GL3 backend (required for running applications) -->
+        <dependency>
+            <groupId>org.openrndr</groupId>
+            <artifactId>openrndr-gl3-jvm</artifactId>
+            <version>${openrndr.version}</version>
+        </dependency>
+
+        <!-- OPENRNDR GL Common (required by GL3) -->
+        <dependency>
+            <groupId>org.openrndr</groupId>
+            <artifactId>openrndr-gl-common-jvm</artifactId>
+            <version>${openrndr.version}</version>
+        </dependency>
+
+        <!-- LWJGL natives for macOS (required for GL3) - version 3.3.3 to match openrndr-gl3 -->
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl</artifactId>
+            <version>3.3.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-glfw</artifactId>
+            <version>3.3.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-opengl</artifactId>
+            <version>3.3.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-jemalloc</artifactId>
+            <version>3.3.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-stb</artifactId>
+            <version>3.3.3</version>
+        </dependency>
+
+        <!-- LWJGL natives for macOS ARM64 (Apple Silicon) -->
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl</artifactId>
+            <version>3.3.3</version>
+            <classifier>natives-macos-arm64</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-glfw</artifactId>
+            <version>3.3.3</version>
+            <classifier>natives-macos-arm64</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-opengl</artifactId>
+            <version>3.3.3</version>
+            <classifier>natives-macos-arm64</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-jemalloc</artifactId>
+            <version>3.3.3</version>
+            <classifier>natives-macos-arm64</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-stb</artifactId>
+            <version>3.3.3</version>
+            <classifier>natives-macos-arm64</classifier>
+        </dependency>
+
+        <!-- SLF4J logging implementation -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+        </dependency>
+
+        <!-- Kotlin standard library -->
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-stdlib</artifactId>
+        </dependency>
+
+        <!-- Kotlin coroutines for reactive streams -->
+        <dependency>
+            <groupId>org.jetbrains.kotlinx</groupId>
+            <artifactId>kotlinx-coroutines-core</artifactId>
+        </dependency>
+
+        <!-- Kotlin serialization (required by OPENRNDR) -->
+        <dependency>
+            <groupId>org.jetbrains.kotlinx</groupId>
+            <artifactId>kotlinx-serialization-json</artifactId>
+            <version>1.3.2</version>
+        </dependency>
+
+        <!-- Kotlin logging (required by OPENRNDR 0.4.4 - uses older mu.KotlinLogging package) -->
+        <dependency>
+            <groupId>io.github.microutils</groupId>
+            <artifactId>kotlin-logging-jvm</artifactId>
+            <version>2.0.6</version>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <!-- Testing -->
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-test-junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <sourceDirectory>src/main/kotlin</sourceDirectory>
+        <testSourceDirectory>src/test/kotlin</testSourceDirectory>
+
+        <plugins>
+            <!-- Kotlin Maven Plugin -->
+            <plugin>
+                <groupId>org.jetbrains.kotlin</groupId>
+                <artifactId>kotlin-maven-plugin</artifactId>
+            </plugin>
+
+            <!-- Maven JAR Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+            </plugin>
+
+            <!-- Exec Maven Plugin for running examples -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <executable>java</executable>
+                    <arguments>
+                        <!-- macOS requires -XstartOnFirstThread for GLFW/OpenGL -->
+                        <argument>-XstartOnFirstThread</argument>
+                        <argument>-Djava.library.path=${project.parent.basedir}/kinect-jni/target:${env.HOME}/freenect2/lib</argument>
+                        <argument>-classpath</argument>
+                        <classpath/>
+                        <argument>org.openrndr.kinect2.examples.Kinect2DepthExampleKt</argument>
+                    </arguments>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

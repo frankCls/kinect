@@ -28,11 +28,17 @@
 #ifdef __APPLE__
 #include <dispatch/dispatch.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <pthread.h>
 
 // GLFW forward declarations (to check initialization status)
 extern "C" {
     int glfwInit(void);
     void glfwTerminate(void);
+}
+
+// Helper function to check if we're on the main thread
+inline bool isMainThread() {
+    return pthread_main_np() != 0;
 }
 #endif
 
@@ -103,10 +109,17 @@ void ensureGLFWInitialized() {
     fprintf(stderr, "[JNI] GLFW not initialized, dispatching to main thread...\n");
     fflush(stderr);
 
-    // Dispatch to main thread
-    dispatch_sync(dispatch_get_main_queue(), ^{
+    // If we're already on the main thread, just call directly to avoid deadlock
+    if (isMainThread()) {
+        fprintf(stderr, "[JNI] Already on main thread, initializing GLFW directly...\n");
+        fflush(stderr);
         initializeGLFWOnMainThread();
-    });
+    } else {
+        // Dispatch to main thread
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            initializeGLFWOnMainThread();
+        });
+    }
 
     lock.lock();
     g_glfwInitInProgress = false;
@@ -123,7 +136,7 @@ libfreenect2::PacketPipeline* createOpenGLPipelineOnMainThread() {
     __block bool pipelineCreated = false;
     __block std::string errorMessage;
 
-    dispatch_sync(dispatch_get_main_queue(), ^{
+    auto createPipeline = ^{
         try {
             fprintf(stderr, "[JNI] Creating OpenGL pipeline on main thread...\n");
             fflush(stderr);
@@ -140,7 +153,16 @@ libfreenect2::PacketPipeline* createOpenGLPipelineOnMainThread() {
             fprintf(stderr, "[JNI] ERROR: Unknown exception creating pipeline\n");
             fflush(stderr);
         }
-    });
+    };
+
+    // If we're already on the main thread, just call directly to avoid deadlock
+    if (isMainThread()) {
+        fprintf(stderr, "[JNI] Already on main thread, creating pipeline directly...\n");
+        fflush(stderr);
+        createPipeline();
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), createPipeline);
+    }
 
     if (!pipelineCreated) {
         throw std::runtime_error(errorMessage);
@@ -323,13 +345,23 @@ JNI_METHOD(void, FreenectContext, nativeDestroyContext)(JNIEnv *env, jobject obj
 #ifdef __APPLE__
         // On macOS, GLFW cleanup must also happen on the main thread
         // The OpenGLPacketPipeline destructor calls glfwDestroyWindow which requires main thread
-        dispatch_sync(dispatch_get_main_queue(), ^{
+
+        auto destroyContext = ^{
             fprintf(stderr, "[JNI] Destroying Freenect2 context on main thread...\n");
             fflush(stderr);
             delete freenect2;
             fprintf(stderr, "[JNI] Freenect2 context destroyed\n");
             fflush(stderr);
-        });
+        };
+
+        // If we're already on the main thread, just call directly to avoid deadlock
+        if (isMainThread()) {
+            fprintf(stderr, "[JNI] Already on main thread, destroying context directly...\n");
+            fflush(stderr);
+            destroyContext();
+        } else {
+            dispatch_sync(dispatch_get_main_queue(), destroyContext);
+        }
 #else
         delete freenect2;
 #endif
@@ -410,13 +442,44 @@ JNI_METHOD(jstring, FreenectContext, nativeGetDefaultDeviceSerial)(JNIEnv *env, 
 // ============================================================================
 
 /**
+ * Create a packet pipeline based on type.
+ *
+ * @param pipelineType 0 = CPU, 1 = OPENGL
+ * @return pointer to PacketPipeline (caller must manage lifetime)
+ */
+libfreenect2::PacketPipeline* createPipeline(int pipelineType) {
+    if (pipelineType == 0) {  // CPU
+        fprintf(stderr, "[JNI] Creating CPU pipeline...\n");
+        fflush(stderr);
+        libfreenect2::PacketPipeline *pipeline = new libfreenect2::CpuPacketPipeline();
+        fprintf(stderr, "[JNI] CPU pipeline created successfully\n");
+        fflush(stderr);
+        return pipeline;
+    } else {  // OPENGL (default)
+#ifdef __APPLE__
+        // On macOS, create OpenGL pipeline on the main thread
+        return createOpenGLPipelineOnMainThread();
+#else
+        // On other platforms, create pipeline normally
+        fprintf(stderr, "[JNI] Creating OpenGL pipeline...\n");
+        fflush(stderr);
+        libfreenect2::PacketPipeline *pipeline = new libfreenect2::OpenGLPacketPipeline();
+        fprintf(stderr, "[JNI] OpenGL pipeline created\n");
+        fflush(stderr);
+        return pipeline;
+#endif
+    }
+}
+
+/**
  * Open a Kinect device.
  *
  * @param contextHandle native pointer to libfreenect2::Freenect2
  * @param serial device serial (null for default)
+ * @param pipelineType packet pipeline type (0 = CPU, 1 = OPENGL)
  * @return native pointer to DeviceContext
  */
-JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlong contextHandle, jstring serial) {
+JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlong contextHandle, jstring serial, jint pipelineType) {
     if (contextHandle == 0) {
         throwRuntimeException(env, "Invalid context handle");
         return 0;
@@ -436,7 +499,8 @@ JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlon
         }
 
         // Log debug info
-        fprintf(stderr, "[JNI] nativeOpenDevice: Device serial = %s\n", serialStr.c_str());
+        fprintf(stderr, "[JNI] nativeOpenDevice: Device serial = %s, pipeline type = %d\n",
+                serialStr.c_str(), pipelineType);
         fflush(stderr);
 
         // Check if serial is empty (no device available)
@@ -447,24 +511,14 @@ JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlon
             return 0;
         }
 
-#ifdef __APPLE__
-        // On macOS, create OpenGL pipeline on the main thread
-        // Both GLFW initialization and OpenGL context creation must happen on main thread
-        libfreenect2::PacketPipeline *pipeline = createOpenGLPipelineOnMainThread();
-#else
-        // On other platforms, create pipeline normally
-        fprintf(stderr, "[JNI] Creating OpenGL pipeline...\n");
-        fflush(stderr);
-        libfreenect2::PacketPipeline *pipeline = new libfreenect2::OpenGLPacketPipeline();
-        fprintf(stderr, "[JNI] OpenGL pipeline created\n");
-        fflush(stderr);
-#endif
+        // Create pipeline based on type
+        libfreenect2::PacketPipeline *pipeline = createPipeline(pipelineType);
 
-        // Open device with OpenGL pipeline
+        // Open device with selected pipeline
         fprintf(stderr, "[JNI] Opening device...\n");
         fflush(stderr);
         libfreenect2::Freenect2Device *device = freenect2->openDevice(serialStr, pipeline);
-        
+
         fprintf(stderr, "[JNI] openDevice() returned (device=%p)\n", device);
         fflush(stderr);
 
