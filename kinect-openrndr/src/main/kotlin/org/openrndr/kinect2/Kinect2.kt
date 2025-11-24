@@ -411,14 +411,25 @@ class Kinect2DepthCamera : Kinect2Camera(
         val maxDepth = 4500f
 
         data.position(0)
-        for (i in 0 until width * height) {
-            val depthMm = data.int and 0xFFFF  // Read as unsigned 16-bit
-            val normalized = if (depthMm > 0) {
-                ((depthMm - minDepth) / (maxDepth - minDepth)).coerceIn(0f, 1f)
-            } else {
-                0f
+
+        // Read depth data and flip vertically (image is upside down from libfreenect2)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                // Read from source (top-down)
+                val srcIdx = y * width + x
+                data.position(srcIdx * 4)  // 4 bytes per pixel in source (float depth)
+                val depthMm = (data.short.toInt() and 0xFFFF)  // Read as unsigned 16-bit
+
+                // Write to destination (bottom-up for flip)
+                val dstIdx = (height - 1 - y) * width + x
+                val normalized = if (depthMm > 0) {
+                    ((depthMm - minDepth) / (maxDepth - minDepth)).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+                buffer.position(dstIdx * 2)  // 2 bytes per pixel in destination (FLOAT16)
+                buffer.putShort((normalized * 65535f).toInt().toShort())
             }
-            buffer.putShort((normalized * 65535f).toInt().toShort())
         }
     }
 }
