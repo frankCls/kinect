@@ -431,48 +431,82 @@ class Kinect2DepthCamera : Kinect2Camera(
 
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
         val data = frame.data
-
-        // Use practical depth range for Kinect V2
-        // Sensor reports 500-4500mm reliable range, but we'll use wider for better visualization
-        val minDepth = 500f   // 0.5m - anything closer is invalid/noise
-        val maxDepth = 5000f  // 5m - good practical range for indoor scenes
+        // Very close range for user sitting 30cm from camera
+        val minDepth = 200f   // Anything closer than 20cm = black (sensor minimum)
+        val maxDepth = 1500f  // Further than 1.5m = black
         val range = maxDepth - minDepth
+
+        // Collect statistics for debugging
+        val histogram = IntArray(10) // 0-500, 500-1000, 1000-1500, ..., 4500-5000, >5000
+        var invalidCount = 0
 
         data.position(0)
 
-        // Convert to grayscale
+        // First pass: analyze depth distribution
+        for (i in 0 until width * height) {
+            data.position(i * 4)
+            val depthMm = (data.short.toInt() and 0xFFFF).toFloat()
+
+            when {
+                depthMm == 0f -> invalidCount++
+                depthMm < 500f -> histogram[0]++
+                depthMm < 1000f -> histogram[1]++
+                depthMm < 1500f -> histogram[2]++
+                depthMm < 2000f -> histogram[3]++
+                depthMm < 2500f -> histogram[4]++
+                depthMm < 3000f -> histogram[5]++
+                depthMm < 3500f -> histogram[6]++
+                depthMm < 4000f -> histogram[7]++
+                depthMm < 4500f -> histogram[8]++
+                depthMm < 5000f -> histogram[9]++
+                else -> invalidCount++  // > 5000 or invalid
+            }
+        }
+
+        // Log detailed histogram every 30 frames
+        if (framesReceived % 30L == 1L) {
+            logger.info("Depth histogram (frame $framesReceived):")
+            logger.info("  Invalid/0mm: $invalidCount pixels")
+            logger.info("  0-500mm: ${histogram[0]} pixels")
+            logger.info("  500-1000mm: ${histogram[1]} pixels")
+            logger.info("  1000-1500mm: ${histogram[2]} pixels")
+            logger.info("  1500-2000mm: ${histogram[3]} pixels")
+            logger.info("  2000-2500mm: ${histogram[4]} pixels")
+            logger.info("  2500-3000mm: ${histogram[5]} pixels")
+            logger.info("  3000-3500mm: ${histogram[6]} pixels")
+            logger.info("  3500-4000mm: ${histogram[7]} pixels")
+            logger.info("  4000-4500mm: ${histogram[8]} pixels")
+            logger.info("  4500-5000mm: ${histogram[9]} pixels")
+        }
+
+        // Second pass: convert to grayscale
+        data.position(0)
         for (y in 0 until height) {
             for (x in 0 until width) {
                 val srcIdx = y * width + x
                 data.position(srcIdx * 4)
                 val depthMm = (data.short.toInt() and 0xFFFF).toFloat()
 
-                // Write to destination (bottom-up for vertical flip)
                 val dstIdx = (height - 1 - y) * width + x
 
-                // Map depth to grayscale
-                // Close = bright (255), far = dark (0)
+                // Map to grayscale: very close range (200-1500mm) for user at 30cm
+                // INVERTED: close objects = WHITE, far objects = BLACK
                 val grayValue = when {
-                    depthMm < minDepth -> 255.toByte()  // Very close = white
-                    depthMm > maxDepth -> 0.toByte()     // Very far = black
+                    depthMm <= 0f -> 0.toByte()  // Invalid = black
+                    depthMm < minDepth -> 0.toByte()  // Too close (< 20cm) or noise = black
+                    depthMm > maxDepth -> 0.toByte()  // Too far (> 1.5m) = black
                     else -> {
                         val normalized = ((depthMm - minDepth) / range).coerceIn(0f, 1f)
-                        (255f * (1f - normalized)).toInt().toByte()
+                        (255f * (1f - normalized)).toInt().toByte()  // 20cm=WHITE, 150cm=BLACK
                     }
                 }
 
-                // Write as RGBa
                 buffer.position(dstIdx * 4)
-                buffer.put(grayValue)  // R
-                buffer.put(grayValue)  // G
-                buffer.put(grayValue)  // B
-                buffer.put(255.toByte())  // A
+                buffer.put(grayValue)
+                buffer.put(grayValue)
+                buffer.put(grayValue)
+                buffer.put(255.toByte())
             }
-        }
-
-        // Log stats on first frame
-        if (framesReceived == 1L) {
-            logger.info("Using fixed depth range: ${minDepth.toInt()}mm - ${maxDepth.toInt()}mm for visualization")
         }
     }
 }
