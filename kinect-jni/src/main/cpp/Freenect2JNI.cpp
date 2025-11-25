@@ -23,6 +23,8 @@
 #include <map>
 #include <mutex>
 #include <condition_variable>
+#include <thread>
+#include <chrono>
 
 // macOS-specific includes for Grand Central Dispatch
 #ifdef __APPLE__
@@ -699,7 +701,12 @@ JNI_METHOD(void, KinectDevice, nativeStop)(JNIEnv *env, jobject obj, jlong handl
             return;
         }
 
+        // Stop the device first - this will unblock any waiting listener threads
         ctx->device->stop();
+
+        // Give the listener thread time to exit cleanly from waitForNewFrame()
+        // This prevents crashes when deleting the listener while it's still blocked
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         // Clean up listener
         if (ctx->listener != nullptr) {
