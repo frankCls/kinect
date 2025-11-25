@@ -544,17 +544,25 @@ class Kinect2ColorCamera : Kinect2Camera(
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
         val data = frame.data
 
-        // Convert BGRX to RGB
+        // Convert BGRX to RGB with vertical flip
         data.position(0)
-        for (i in 0 until width * height) {
-            val b = data.get()
-            val g = data.get()
-            val r = data.get()
-            data.get() // Skip X byte
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val srcIdx = y * width + x
+                data.position(srcIdx * 4)  // 4 bytes per pixel (BGRX)
 
-            buffer.put(r)
-            buffer.put(g)
-            buffer.put(b)
+                val b = data.get()
+                val g = data.get()
+                val r = data.get()
+                data.get() // Skip X byte
+
+                // Flip vertically
+                val dstIdx = (height - 1 - y) * width + x
+                buffer.position(dstIdx * 3)  // 3 bytes per pixel (RGB)
+                buffer.put(r)
+                buffer.put(g)
+                buffer.put(b)
+            }
         }
     }
 }
@@ -575,35 +583,44 @@ class Kinect2IRCamera : Kinect2Camera(
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
         val data = frame.data
 
-        // Convert 16-bit IR to grayscale
+        // Convert 16-bit IR to grayscale with vertical flip
         // Use realistic max of 20000 instead of 65535 for better visibility
         // Most indoor IR values are 0-10000, so 20000 gives good contrast
         data.position(0)
-        for (i in 0 until width * height) {
-            // Read as 32-bit little-endian float
-            // libfreenect2 provides IR data as 32-bit IEEE 754 floats, not 16-bit integers
-            val byte0 = data.get().toInt() and 0xFF
-            val byte1 = data.get().toInt() and 0xFF
-            val byte2 = data.get().toInt() and 0xFF
-            val byte3 = data.get().toInt() and 0xFF
-            val bits = (byte3 shl 24) or (byte2 shl 16) or (byte1 shl 8) or byte0
-            val irFloat = Float.fromBits(bits)
+        for (y in 0 until height) {
+            for (x in 0 until width) {
+                val srcIdx = y * width + x
+                data.position(srcIdx * 4)  // 4 bytes per pixel (float)
 
-            // Convert to int for normalization, handle invalid values
-            val ir = when {
-                irFloat <= 0f || irFloat.isNaN() || irFloat.isInfinite() -> 0
-                else -> irFloat.toInt()
+                // Read as 32-bit little-endian float
+                // libfreenect2 provides IR data as 32-bit IEEE 754 floats, not 16-bit integers
+                val byte0 = data.get().toInt() and 0xFF
+                val byte1 = data.get().toInt() and 0xFF
+                val byte2 = data.get().toInt() and 0xFF
+                val byte3 = data.get().toInt() and 0xFF
+                val bits = (byte3 shl 24) or (byte2 shl 16) or (byte1 shl 8) or byte0
+                val irFloat = Float.fromBits(bits)
+
+                // Convert to int for normalization, handle invalid values
+                val ir = when {
+                    irFloat <= 0f || irFloat.isNaN() || irFloat.isInfinite() -> 0
+                    else -> irFloat.toInt()
+                }
+
+                // Normalize with realistic max for better visibility
+                val gray = minOf(255, (ir * 255) / 20000)
+                val grayValue = gray.toByte()
+
+                // Flip vertically
+                val dstIdx = (height - 1 - y) * width + x
+                buffer.position(dstIdx * 4)  // 4 bytes per pixel (RGBa)
+
+                // Write as RGBa (replicate gray value to R, G, B channels)
+                buffer.put(grayValue)  // R
+                buffer.put(grayValue)  // G
+                buffer.put(grayValue)  // B
+                buffer.put(255.toByte())  // A (fully opaque)
             }
-
-            // Normalize with realistic max for better visibility
-            val gray = minOf(255, (ir * 255) / 20000)
-            val grayValue = gray.toByte()
-
-            // Write as RGBa (replicate gray value to R, G, B channels)
-            buffer.put(grayValue)  // R
-            buffer.put(grayValue)  // G
-            buffer.put(grayValue)  // B
-            buffer.put(255.toByte())  // A (fully opaque)
         }
     }
 }
