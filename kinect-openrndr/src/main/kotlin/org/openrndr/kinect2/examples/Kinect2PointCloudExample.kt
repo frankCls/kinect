@@ -89,7 +89,7 @@ fun main() {
             val cx = 256.0    // principal point (X)
             val cy = 212.0    // principal point (Y)
 
-            fun unproject(x: Int, y: Int, depth: Double): Vector3 {
+            fun unProject(x: Int, y: Int, depth: Double): Vector3 {
                 val z = depth / 1000.0  // Convert mm to meters
                 val xVal = (x.toDouble() - cx) * z / fx
                 val yVal = (y.toDouble() - cy) * z / fy
@@ -173,7 +173,7 @@ fun main() {
                 }
 
                 // Background
-                drawer.background(ColorRGBa.BLACK)
+                drawer.clear(ColorRGBa.BLACK)
 
                 // Step 1: Get depth data from camera buffer (thread-safe)
                 val depthData = kinect.depthCamera.getDataBuffer()
@@ -217,7 +217,7 @@ fun main() {
 
                                     // Filter: only show closest object (within DEPTH_RANGE from minimum)
                                     if (depthMm >= minDepth && depthMm <= maxDepthForCloud && !depthMm.isNaN()) {
-                                        val point3D = unproject(x, y, depthMm)
+                                        val point3D = unProject(x, y, depthMm)
                                         points.add(point3D)
                                         colors.add(getColorForDepth(depthMm, minDepth, maxDepthForCloud))
                                     }
@@ -287,3 +287,20 @@ fun main() {
         }
     }
 }
+
+// Camera parameters as lazy properties
+private val intrinsics by lazy {
+    CameraIntrinsics(
+        fx = 365.0,
+        fy = 365.0,
+        cx = 256.0,
+        cy = 212.0
+    )
+}
+
+data class CameraIntrinsics(
+    val fx: Double,
+    val fy: Double,
+    val cx: Double,
+    val cy: Double
+)

@@ -28,32 +28,18 @@ object Kinect2Manager {
      *
      * @return true if library is available, false otherwise
      */
-    fun isLibraryLoaded(): Boolean {
-        return try {
-            Freenect.isLibraryLoaded()
-        } catch (e: Exception) {
-            logger.error("Error checking library status", e)
-            false
-        }
-    }
+    fun isLibraryLoaded(): Boolean = runCatching { Freenect.isLibraryLoaded() }
+        .onFailure { logger.error("Error checking library status", it) }
+        .getOrDefault(false)
 
     /**
      * Get libfreenect2 version string.
      *
      * @return version string, or null if library not loaded
      */
-    fun getLibraryVersion(): String? {
-        return try {
-            if (isLibraryLoaded()) {
-                Freenect.getVersion()
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            logger.error("Error getting library version", e)
-            null
-        }
-    }
+    fun getLibraryVersion(): String? = runCatching {
+        if (isLibraryLoaded()) Freenect.getVersion() else null
+    }.onFailure { logger.error("Error getting library version", it) }.getOrNull()
 
     /**
      * Get list of available Kinect V2 devices.
@@ -68,20 +54,17 @@ object Kinect2Manager {
             logger.warn("Kinect library not loaded, cannot enumerate devices")
             return emptyList()
         }
-
-        return try {
+        return runCatching {
             val context = FreenectContextManager.getContext()
             val count = context.getDeviceCount()
             logger.debug("Found $count Kinect V2 device(s)")
-
-            (0 until count).map { index ->
-                val serial = context.getDeviceSerial(index)
-                Kinect2DeviceInfo(index, serial)
+            buildList {
+                repeat(count) { index ->
+                    add(Kinect2DeviceInfo(index, context.getDeviceSerial(index)))
+                }
             }
-        } catch (e: Exception) {
-            logger.error("Error enumerating Kinect devices", e)
-            emptyList()
-        }
+        }.onFailure { logger.error("Error enumerating Kinect devices", it) }
+            .getOrDefault(emptyList())
     }
 
     /**
@@ -89,28 +72,21 @@ object Kinect2Manager {
      *
      * @return device count, or 0 if library not loaded or error occurs
      */
-    fun getDeviceCount(): Int {
-        return getKinectsV2().size
-    }
+    fun getDeviceCount(): Int = getKinectsV2().size
 
     /**
      * Check if any Kinect V2 devices are connected.
      *
      * @return true if at least one device is available
      */
-    fun hasDevices(): Boolean {
-        return getDeviceCount() > 0
-    }
+    fun hasDevices(): Boolean = getDeviceCount() > 0
 
     /**
      * Get default device information (first device).
      *
      * @return device info, or null if no devices available
      */
-    fun getDefaultDevice(): Kinect2DeviceInfo? {
-        val devices = getKinectsV2()
-        return devices.firstOrNull()
-    }
+    fun getDefaultDevice(): Kinect2DeviceInfo? = getKinectsV2().firstOrNull()
 
     /**
      * Get device information by index.
@@ -118,10 +94,7 @@ object Kinect2Manager {
      * @param index device index (0-based)
      * @return device info, or null if index out of range
      */
-    fun getDevice(index: Int): Kinect2DeviceInfo? {
-        val devices = getKinectsV2()
-        return devices.getOrNull(index)
-    }
+    fun getDevice(index: Int): Kinect2DeviceInfo? = getKinectsV2().getOrNull(index)
 
     /**
      * Get device information by serial number.
@@ -129,10 +102,8 @@ object Kinect2Manager {
      * @param serial device serial number
      * @return device info, or null if not found
      */
-    fun getDeviceBySerial(serial: String): Kinect2DeviceInfo? {
-        val devices = getKinectsV2()
-        return devices.firstOrNull { it.serial == serial }
-    }
+    fun getDeviceBySerial(serial: String): Kinect2DeviceInfo? =
+        getKinectsV2().firstOrNull { it.serial == serial }
 
     /**
      * Print device information to console for debugging.
