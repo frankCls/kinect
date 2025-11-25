@@ -20,8 +20,27 @@ if [ ! -f "target/libkinect-jni.dylib" ]; then
     mvn compile -pl kinect-jni
 fi
 
+# Check if --gui flag is present
+USE_START_ON_FIRST_THREAD=true
+for arg in "$@"; do
+    if [ "$arg" = "--gui" ]; then
+        USE_START_ON_FIRST_THREAD=false
+        break
+    fi
+done
+
 # Run with proper library path
-java -Djava.library.path=target:$HOME/freenect2/lib \
-     -cp target/classes \
-     com.kinect.jni.FrameCaptureDemo \
-     "$@"
+# IMPORTANT: -XstartOnFirstThread is REQUIRED for OpenGL pipeline but breaks Swing GUI
+# When --gui is specified, we DON'T use -XstartOnFirstThread (CPU pipeline will be used automatically)
+if [ "$USE_START_ON_FIRST_THREAD" = true ]; then
+    java -XstartOnFirstThread \
+         -Djava.library.path=target:$HOME/freenect2/lib \
+         -cp target/classes \
+         com.kinect.jni.FrameCaptureDemo \
+         "$@"
+else
+    java -Djava.library.path=target:$HOME/freenect2/lib \
+         -cp target/classes \
+         com.kinect.jni.FrameCaptureDemo \
+         "$@"
+fi

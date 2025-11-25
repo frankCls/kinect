@@ -70,6 +70,12 @@ public class FrameCaptureDemo {
         System.out.println(ANSI_GREEN + "Native library loaded: ✓" + ANSI_RESET);
         System.out.println("libfreenect2 version: " + Freenect.getVersion());
 
+        // Force CPU pipeline when GUI is enabled (OpenGL pipeline requires -XstartOnFirstThread which breaks Swing)
+        if (enableGui && pipelineType != PipelineType.CPU) {
+            System.out.println(ANSI_YELLOW + "WARNING: GUI mode requires CPU pipeline. Switching from " + pipelineType + " to CPU." + ANSI_RESET);
+            pipelineType = PipelineType.CPU;
+        }
+
         // Run capture session
         CaptureSession session = new CaptureSession(enableGui, durationSeconds, frameCount, pipelineType);
         try {
@@ -140,10 +146,11 @@ public class FrameCaptureDemo {
                 System.out.println("Pipeline type: " + pipelineType);
                 System.out.println("Opening device...");
                 try (KinectDevice device = context.openDefaultDevice(pipelineType)) {
-                    System.out.println(ANSI_GREEN + "Device opened successfully" + ANSI_RESET);
+                    System.out.println(ANSI_GREEN + "Device opened successfully");
                     System.out.println("Firmware version: " + device.getFirmwareVersion());
 
                     System.out.println("\nStarting frame capture...");
+                    System.out.println("\nWill run for " +  durationSeconds + " seconds" + ANSI_RESET);
                     device.start();
 
                     long startTime = System.currentTimeMillis();
@@ -330,7 +337,14 @@ public class FrameCaptureDemo {
         }
 
         public void show() {
-            SwingUtilities.invokeLater(() -> frame.setVisible(true));
+            System.out.println("FrameDisplay.show() called - scheduling GUI window to appear");
+            SwingUtilities.invokeLater(() -> {
+                System.out.println("SwingUtilities.invokeLater() executing - making frame visible");
+                frame.setVisible(true);
+                System.out.println("Frame visibility set to true. Window should now be visible.");
+                System.out.println("Frame isVisible: " + frame.isVisible());
+                System.out.println("Frame isShowing: " + frame.isShowing());
+            });
         }
 
         public void close() {
@@ -348,6 +362,9 @@ public class FrameCaptureDemo {
             int height = frame.getHeight();
             int bpp = frame.getBytesPerPixel();
 
+            // Debug logging: sample center pixel
+            boolean logSample = (frame.getSequence() % 30 == 0);  // Log every 30th frame
+
             // Convert frame data to image
             for (int y = 0; y < height; y++) {
                 for (int x = 0; x < width; x++) {
@@ -360,15 +377,34 @@ public class FrameCaptureDemo {
                         int r = data.get(idx + 2) & 0xFF;
                         img.setRGB(x, y, (r << 16) | (g << 8) | b);
                     } else {
-                        // Depth/IR: grayscale from first 2 bytes
-                        int low = data.get(idx) & 0xFF;
-                        int high = data.get(idx + 1) & 0xFF;
-                        int value = (high << 8) | low;
+                        // Depth/IR: 32-bit float format (4 bytes per pixel)
+                        // Read as little-endian float
+                        int byte0 = data.get(idx) & 0xFF;
+                        int byte1 = data.get(idx + 1) & 0xFF;
+                        int byte2 = data.get(idx + 2) & 0xFF;
+                        int byte3 = data.get(idx + 3) & 0xFF;
+                        int bits = (byte3 << 24) | (byte2 << 16) | (byte1 << 8) | byte0;
+                        float value = Float.intBitsToFloat(bits);
 
                         // Normalize to 0-255
-                        int gray = type == FrameType.DEPTH ?
-                            Math.min(255, (value * 255) / 4500) :  // Depth: 0-4500mm -> 0-255
-                            Math.min(255, (value * 255) / 65535);  // IR: full 16-bit range
+                        int gray;
+
+                        // Handle invalid values (≤0, NaN, infinity)
+                        if (value <= 0 || Float.isNaN(value) || Float.isInfinite(value)) {
+                            gray = 0;  // Invalid data = black
+                        } else if (type == FrameType.DEPTH) {
+                            // Depth: normalize by 4500mm max range (matches Protonect)
+                            gray = Math.min(255, Math.round(value * 255.0f / 4500.0f));
+                        } else {
+                            // IR: normalize by 20000 for good contrast
+                            gray = Math.min(255, Math.round(value * 255.0f / 20000.0f));
+                        }
+
+                        // Debug sample center pixel
+                        if (logSample && x == width/2 && y == height/2) {
+                            System.out.printf("[%s] Center pixel: raw=%.1f, gray=%d (%.1f%%)\\n",
+                                type.name(), value, gray, (gray * 100.0 / 255.0));
+                        }
 
                         img.setRGB(x, y, (gray << 16) | (gray << 8) | gray);
                     }
