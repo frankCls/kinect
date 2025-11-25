@@ -69,7 +69,7 @@ class Kinect2 : Extension {
         private set
 
     // Internal state
-    private var context: FreenectContext? = null
+    // Note: FreenectContext is managed by FreenectContextManager singleton
     private var device: KinectDevice? = null
     private var program: Program? = null
     private var acquisitionThread: Thread? = null
@@ -90,9 +90,8 @@ class Kinect2 : Extension {
             }
             logger.info("libfreenect2 version: ${Freenect.getVersion()}")
 
-            // Create context and open device
-            context = Freenect.createContext()
-            val ctx = context ?: throw RuntimeException("Failed to create Freenect context")
+            // Get singleton context and open device
+            val ctx = FreenectContextManager.getContext()
 
             val deviceCount = ctx.getDeviceCount()
             logger.info("Found $deviceCount Kinect V2 device(s)")
@@ -239,15 +238,9 @@ class Kinect2 : Extension {
             }
         }
 
-        // Close context
-        context?.let {
-            try {
-                it.close()
-                logger.info("Context closed")
-            } catch (e: Exception) {
-                logger.error("Error closing context", e)
-            }
-        }
+        // Context is managed by FreenectContextManager singleton
+        // It will be automatically cleaned up on JVM shutdown
+        // Do NOT close it here - other Kinect2 instances may be using it
 
         // Clean up camera resources
         if (::depthCamera.isInitialized) depthCamera.dispose()
@@ -255,7 +248,6 @@ class Kinect2 : Extension {
         if (::irCamera.isInitialized) irCamera.dispose()
 
         device = null
-        context = null
         acquisitionThread = null
     }
 }

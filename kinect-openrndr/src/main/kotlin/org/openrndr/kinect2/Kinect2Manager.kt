@@ -58,8 +58,8 @@ object Kinect2Manager {
     /**
      * Get list of available Kinect V2 devices.
      *
-     * This creates a temporary context to enumerate devices.
-     * The context is closed after enumeration.
+     * Uses the singleton FreenectContext for enumeration to avoid
+     * rapid context creation/destruction issues on macOS.
      *
      * @return list of device information, empty if no devices or library not loaded
      */
@@ -70,14 +70,13 @@ object Kinect2Manager {
         }
 
         return try {
-            Freenect.createContext().use { context ->
-                val count = context.getDeviceCount()
-                logger.debug("Found $count Kinect V2 device(s)")
+            val context = FreenectContextManager.getContext()
+            val count = context.getDeviceCount()
+            logger.debug("Found $count Kinect V2 device(s)")
 
-                (0 until count).map { index ->
-                    val serial = context.getDeviceSerial(index)
-                    Kinect2DeviceInfo(index, serial)
-                }
+            (0 until count).map { index ->
+                val serial = context.getDeviceSerial(index)
+                Kinect2DeviceInfo(index, serial)
             }
         } catch (e: Exception) {
             logger.error("Error enumerating Kinect devices", e)
