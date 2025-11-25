@@ -392,13 +392,13 @@ abstract class Kinect2Camera(
 /**
  * Depth camera (512x424, 16-bit depth values in millimeters).
  *
- * **What You Should See:**
- * - **Grayscale depth map** where brightness represents distance from the camera
- * - **Black pixels**: Objects very close to camera (< 500mm / 0.5m) or invalid depth readings
- * - **Dark gray**: Objects close to camera (around 500-1500mm / 0.5-1.5m)
+ * **What You Should See (Standard "X-Ray" Visualization):**
+ * - **Grayscale depth map** where brightness is INVERTED: close=bright, far=dark
+ * - **White/Bright pixels**: Objects very close to camera (< 500mm / 0.5m)
+ * - **Light gray**: Objects close to camera (around 500-1500mm / 0.5-1.5m)
  * - **Medium gray**: Objects at mid-range (around 1500-3000mm / 1.5-3m)
- * - **Light gray/White**: Objects far from camera (3000-4500mm / 3-4.5m)
- * - **Black**: Background/objects beyond 4500mm (4.5m) or areas with no depth data
+ * - **Dark gray**: Objects far from camera (3000-4500mm / 3-4.5m)
+ * - **Black**: Background/objects beyond 4500mm (4.5m) or areas with no depth data (invalid readings)
  *
  * **Kinect V2 Depth Specifications:**
  * - Resolution: 512x424 pixels
@@ -427,86 +427,111 @@ class Kinect2DepthCamera : Kinect2Camera(
     colorType = ColorType.UINT8,
     bytesPerPixel = 4  // RGBa = 4 bytes (R, G, B, A)
 ) {
+    companion object {
+        // Gamma correction lookup table for depth visualization
+        // Pre-calculated for all possible 16-bit depth values (0-65535mm)
+        // Formula: Output = 255 * ((depthMm - MIN_DEPTH) / (MAX_DEPTH - MIN_DEPTH))^(1/GAMMA)
+        // Then inverted so close objects are BRIGHT and far objects are DARK
+        private val depthGammaTable = IntArray(65536).apply {
+            val GAMMA = 2.2
+            val MAX_DEPTH = 4000.0  // Reduced from 8000 for better indoor contrast
+            val MIN_DEPTH = 500.0
+
+            for (i in 0 until 65536) {
+                when {
+                    i == 0 -> this[i] = 0  // Invalid depth (0mm) = black
+                    i < MIN_DEPTH.toInt() -> this[i] = 255  // Very close (<500mm) = white
+                    i > MAX_DEPTH.toInt() -> this[i] = 0   // Very far (>4000mm) = black
+                    else -> {
+                        // Normalize to 0.0-1.0 range
+                        val normalized = (i - MIN_DEPTH) / (MAX_DEPTH - MIN_DEPTH)
+                        // Apply gamma correction
+                        val gammaCorrected = Math.pow(normalized, 1.0 / GAMMA)
+                        // INVERT: close (normalized=0) should be bright (255), far (normalized=1) should be dark (0)
+                        this[i] = ((1.0 - gammaCorrected) * 255).toInt().coerceIn(0, 255)
+                    }
+                }
+            }
+        }
+    }
+
     private val logger = LoggerFactory.getLogger(Kinect2DepthCamera::class.java)
 
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
         val data = frame.data
-        // Very close range for user sitting 30cm from camera
-        val minDepth = 200f   // Anything closer than 20cm = black (sensor minimum)
-        val maxDepth = 1500f  // Further than 1.5m = black
-        val range = maxDepth - minDepth
-
-        // Collect statistics for debugging
-        val histogram = IntArray(10) // 0-500, 500-1000, 1000-1500, ..., 4500-5000, >5000
-        var invalidCount = 0
-
         data.position(0)
 
-        // First pass: analyze depth distribution
-        for (i in 0 until width * height) {
-            data.position(i * 4)
-            val depthMm = (data.short.toInt() and 0xFFFF).toFloat()
+        // Debug: sample center pixel and find closest pixel every 30 frames
+        val shouldLog = (frame.sequence % 30L == 0L)
+        var minDepth = Int.MAX_VALUE
+        var minX = -1
+        var minY = -1
+        var validPixels = 0
 
-            when {
-                depthMm == 0f -> invalidCount++
-                depthMm < 500f -> histogram[0]++
-                depthMm < 1000f -> histogram[1]++
-                depthMm < 1500f -> histogram[2]++
-                depthMm < 2000f -> histogram[3]++
-                depthMm < 2500f -> histogram[4]++
-                depthMm < 3000f -> histogram[5]++
-                depthMm < 3500f -> histogram[6]++
-                depthMm < 4000f -> histogram[7]++
-                depthMm < 4500f -> histogram[8]++
-                depthMm < 5000f -> histogram[9]++
-                else -> invalidCount++  // > 5000 or invalid
-            }
-        }
-
-        // Log detailed histogram every 30 frames
-        if (framesReceived % 30L == 1L) {
-            logger.info("Depth histogram (frame $framesReceived):")
-            logger.info("  Invalid/0mm: $invalidCount pixels")
-            logger.info("  0-500mm: ${histogram[0]} pixels")
-            logger.info("  500-1000mm: ${histogram[1]} pixels")
-            logger.info("  1000-1500mm: ${histogram[2]} pixels")
-            logger.info("  1500-2000mm: ${histogram[3]} pixels")
-            logger.info("  2000-2500mm: ${histogram[4]} pixels")
-            logger.info("  2500-3000mm: ${histogram[5]} pixels")
-            logger.info("  3000-3500mm: ${histogram[6]} pixels")
-            logger.info("  3500-4000mm: ${histogram[7]} pixels")
-            logger.info("  4000-4500mm: ${histogram[8]} pixels")
-            logger.info("  4500-5000mm: ${histogram[9]} pixels")
-        }
-
-        // Second pass: convert to grayscale
-        data.position(0)
+        // Process depth frame: convert to grayscale with INVERTED mapping
+        // Standard "X-Ray" visualization: close=bright (255), far=dark (0)
         for (y in 0 until height) {
             for (x in 0 until width) {
                 val srcIdx = y * width + x
                 data.position(srcIdx * 4)
-                val depthMm = (data.short.toInt() and 0xFFFF).toFloat()
+
+                // Read as 32-bit little-endian float (millimeters)
+                // libfreenect2 provides depth data as 32-bit IEEE 754 floats, not 16-bit integers
+                val byte0 = data.get().toInt() and 0xFF
+                val byte1 = data.get().toInt() and 0xFF
+                val byte2 = data.get().toInt() and 0xFF
+                val byte3 = data.get().toInt() and 0xFF
+                val bits = (byte3 shl 24) or (byte2 shl 16) or (byte1 shl 8) or byte0
+                val depthFloat = Float.fromBits(bits)
+
+                // Convert to int for gamma table lookup, handle invalid values
+                val depthMm = when {
+                    depthFloat <= 0f || depthFloat.isNaN() || depthFloat.isInfinite() -> 0
+                    else -> depthFloat.toInt()
+                }
 
                 val dstIdx = (height - 1 - y) * width + x
 
-                // Map to grayscale: very close range (200-1500mm) for user at 30cm
-                // INVERTED: close objects = WHITE, far objects = BLACK
-                val grayValue = when {
-                    depthMm <= 0f -> 0.toByte()  // Invalid = black
-                    depthMm < minDepth -> 0.toByte()  // Too close (< 20cm) or noise = black
-                    depthMm > maxDepth -> 0.toByte()  // Too far (> 1.5m) = black
-                    else -> {
-                        val normalized = ((depthMm - minDepth) / range).coerceIn(0f, 1f)
-                        (255f * (1f - normalized)).toInt().toByte()  // 20cm=WHITE, 150cm=BLACK
-                    }
+//                // Track closest pixel for diagnostics (ignore 1-2mm as sensor noise/damage)
+//                if (shouldLog && depthMm > 0 && depthMm < 65535) {
+//                    validPixels++
+//                    if (depthMm > 100 && depthMm < minDepth) {  // Ignore 1-2mm readings
+//                        minDepth = depthMm
+//                        minX = x
+//                        minY = y
+//                    }
+//                }
+
+                // Depth visualization with gamma correction:
+                // - Close objects (500-1500mm): BRIGHT (200-255 gray) - user should appear white/bright
+                // - Mid-range objects (1500-4000mm): GREY (100-200 gray)
+                // - Far objects (4000-8000mm): DARK (0-100 gray) - background should be dark grey
+                // - Invalid/no data (0mm): BLACK (0)
+                // - Very far (>8000mm): BLACK (0)
+                //
+                // Uses pre-calculated gamma LUT for performance
+                val gray = depthGammaTable[depthMm.coerceIn(0, 65535)]
+                val grayValue = gray.toByte()
+
+                // Debug center pixel
+                if (shouldLog && x == width/2 && y == height/2) {
+                    logger.info("DEPTH Center pixel: depthMm=$depthMm, gray=$gray (${gray*100/255}%)")
                 }
 
                 buffer.position(dstIdx * 4)
-                buffer.put(grayValue)
-                buffer.put(grayValue)
-                buffer.put(grayValue)
-                buffer.put(255.toByte())
+                buffer.put(grayValue)  // R
+                buffer.put(grayValue)  // G
+                buffer.put(grayValue)  // B
+                buffer.put(255.toByte())  // A
             }
+        }
+
+        // Log closest pixel found
+        if (shouldLog && minX >= 0) {
+            val closestGray = depthGammaTable[minDepth.coerceIn(0, 65535)]
+            val totalPixels = width * height
+            val validPercent = (validPixels * 100.0) / totalPixels
+            logger.info("DEPTH Closest pixel at ($minX, $minY): depthMm=${minDepth}mm, gray=$closestGray (${closestGray*100/255}%) | Valid pixels: $validPixels/$totalPixels (${String.format("%.1f", validPercent)}%)")
         }
     }
 }
@@ -559,11 +584,28 @@ class Kinect2IRCamera : Kinect2Camera(
         val data = frame.data
 
         // Convert 16-bit IR to grayscale
-        // Kinect V2 IR range: 0-65535
+        // Use realistic max of 20000 instead of 65535 for better visibility
+        // Most indoor IR values are 0-10000, so 20000 gives good contrast
         data.position(0)
         for (i in 0 until width * height) {
-            val ir = data.int and 0xFFFF  // Read as unsigned 16-bit
-            val grayValue = (ir / 65535f * 255f).toInt().toByte()
+            // Read as 32-bit little-endian float
+            // libfreenect2 provides IR data as 32-bit IEEE 754 floats, not 16-bit integers
+            val byte0 = data.get().toInt() and 0xFF
+            val byte1 = data.get().toInt() and 0xFF
+            val byte2 = data.get().toInt() and 0xFF
+            val byte3 = data.get().toInt() and 0xFF
+            val bits = (byte3 shl 24) or (byte2 shl 16) or (byte1 shl 8) or byte0
+            val irFloat = Float.fromBits(bits)
+
+            // Convert to int for normalization, handle invalid values
+            val ir = when {
+                irFloat <= 0f || irFloat.isNaN() || irFloat.isInfinite() -> 0
+                else -> irFloat.toInt()
+            }
+
+            // Normalize with realistic max for better visibility
+            val gray = minOf(255, (ir * 255) / 20000)
+            val grayValue = gray.toByte()
 
             // Write as RGBa (replicate gray value to R, G, B channels)
             buffer.put(grayValue)  // R

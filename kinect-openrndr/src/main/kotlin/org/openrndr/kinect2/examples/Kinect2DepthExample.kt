@@ -71,7 +71,7 @@ fun main() = application {
             enableDepth = true
             enableColor = false
             enableInfrared = false
-            pipelineType = PipelineType.CPU
+            pipelineType = PipelineType.CPU  // Use CPU pipeline (safe for OPENRNDR)
         }
 
         // Track time for console output
