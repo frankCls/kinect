@@ -369,6 +369,17 @@ abstract class Kinect2Camera(
     protected abstract fun processFrameData(frame: Frame, buffer: ByteBuffer)
 
     /**
+     * Get a snapshot of the current front buffer data.
+     * Returns a read-only view of the buffer for safe access.
+     * Caller must not modify the buffer contents.
+     */
+    fun getDataBuffer(): ByteBuffer? {
+        return synchronized(bufferLock) {
+            frontDataBuffer?.asReadOnlyBuffer()
+        }
+    }
+
+    /**
      * Dispose ColorBuffer resources.
      */
     fun dispose() {

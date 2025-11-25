@@ -8,15 +8,18 @@ import org.openrndr.kinect2.Kinect2
 import org.openrndr.kinect2.Kinect2Manager
 import org.openrndr.math.Vector3
 import com.kinect.jni.PipelineType
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
 
 /**
  * Kinect V2 Point Cloud Visualization Example
  *
  * Demonstrates real-time 3D point cloud rendering from Kinect V2 depth data.
+ *
+ * **What it shows**: Point cloud of the CLOSEST object before the sensor.
+ * Only points within 1.5m of the nearest detected surface are displayed,
+ * effectively isolating the foreground object from the background.
+ *
  * Features:
- * - Depth-based point cloud generation
+ * - Depth-based point cloud generation focused on closest object
  * - Color mapping from heatmap (blue→cyan→green→yellow→red)
  * - Interactive 3D camera controls
  * - Real-time statistics display
@@ -27,16 +30,17 @@ import kotlinx.coroutines.runBlocking
  * - **Mouse scroll**: Zoom in/out
  * - **W/S/A/D/E/Q**: Move camera
  * - **R**: Reset camera to default position
- * - **+/-**: Increase/decrease downsampling
- * - **Space**: Toggle point cloud update (for performance analysis)
+ * - **+/-**: Increase/decrease downsampling for performance
+ * - **Space**: Pause/resume point cloud updates
  *
- * **Color Mapping**:
- * - Blue: Closest points (near minimum depth)
- * - Cyan, Green, Yellow: Mid-range depths
- * - Red: Farthest points (near maximum depth)
+ * **Color Mapping** (relative to closest object):
+ * - Blue: Nearest surface on the object
+ * - Cyan, Green, Yellow: Mid-range depths on the object
+ * - Red: Farthest visible points (up to 1.5m from nearest surface)
  *
  * **Performance Notes**:
- * - Downsampling (e.g., 2x) reduces point count by 75% but retains detail
+ * - Initial downsampling: 2x (processes every 2nd pixel)
+ * - Downsampling 2x reduces point count by 75% but retains detail
  * - Point cloud generation is CPU-bound (not GPU)
  * - For optimal performance, keep downsampling ≥ 2x
  */
@@ -45,7 +49,8 @@ fun main() {
     val TARGET_FPS = 30.0
     val DEPTH_MIN = 500.0     // mm (0.5m)
     val DEPTH_MAX = 5000.0    // mm (5m)
-    val DOWNSAMPLE_INITIAL = 4
+    val DEPTH_RANGE = 1500.0  // mm (1.5m) - show points within this range from closest
+    val DOWNSAMPLE_INITIAL = 2  // Lower initial downsampling for more points
     val DOWNSAMPLE_MIN = 1
     val DOWNSAMPLE_MAX = 8
 
@@ -170,20 +175,19 @@ fun main() {
                 // Background
                 drawer.background(ColorRGBa.BLACK)
 
-                // Step 1: Get depth frame from flow
-                val depthFrame = kinect.depthCamera.frameFlow.value
-                val colorFrame = kinect.colorCamera.frameFlow.value
+                // Step 1: Get depth data from camera buffer (thread-safe)
+                val depthData = kinect.depthCamera.getDataBuffer()
 
-                if (depthFrame != null && colorFrame != null) {
+                if (depthData != null && kinect.depthCamera.framesReceived > 0) {
                     // Step 2: Generate point cloud
                     points.clear()
                     colors.clear()
                     minDepth = Double.MAX_VALUE
                     var maxDepth = 0.0
 
-                    val depthData = depthFrame.data
-                    val depthWidth = depthFrame.width
-                    val depthHeight = depthFrame.height
+                    // Depth camera specs
+                    val depthWidth = 512
+                    val depthHeight = 424
 
                     for (y in 0 until depthHeight step downsample) {
                         for (x in 0 until depthWidth step downsample) {
@@ -200,7 +204,8 @@ fun main() {
                         }
                     }
 
-                    maxDepthForCloud = minOf(maxDepth, DEPTH_MAX)
+                    // Focus on closest object: show points within DEPTH_RANGE of minimum
+                    maxDepthForCloud = minOf(minDepth + DEPTH_RANGE, DEPTH_MAX)
 
                     if (!isPaused) {
                         for (y in 0 until depthHeight step downsample) {
@@ -210,7 +215,7 @@ fun main() {
                                     val shortDepth = depthData.getShort(depthIdx)
                                     val depthMm = shortDepth.toDouble()
 
-                                    // Filter: only include points near minimum depth
+                                    // Filter: only show closest object (within DEPTH_RANGE from minimum)
                                     if (depthMm >= minDepth && depthMm <= maxDepthForCloud && !depthMm.isNaN()) {
                                         val point3D = unproject(x, y, depthMm)
                                         points.add(point3D)
