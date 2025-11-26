@@ -14,13 +14,12 @@ import com.kinect.jni.PipelineType
  *
  * Demonstrates real-time 3D point cloud rendering from Kinect V2 depth data.
  *
- * **What it shows**: Point cloud of the CLOSEST object before the sensor.
- * Only points within 1.5m of the nearest detected surface are displayed,
- * effectively isolating the foreground object from the background.
+ * **What it shows**: Complete 3D point cloud from Kinect sensor.
+ * Shows ALL valid depth points in white for straightforward visualization.
  *
  * Features:
- * - Depth-based point cloud generation focused on closest object
- * - Color mapping from heatmap (blue→cyan→green→yellow→red)
+ * - Complete 3D point cloud from all valid depth readings
+ * - Single white color for clear visualization
  * - Interactive 3D camera controls
  * - Real-time statistics display
  * - Performance optimization via downsampling
@@ -32,11 +31,6 @@ import com.kinect.jni.PipelineType
  * - **R**: Reset camera to default position
  * - **+/-**: Increase/decrease downsampling for performance
  * - **Space**: Pause/resume point cloud updates
- *
- * **Color Mapping** (relative to closest object):
- * - Blue: Nearest surface on the object
- * - Cyan, Green, Yellow: Mid-range depths on the object
- * - Red: Farthest visible points (up to 1.5m from nearest surface)
  *
  * **Performance Notes**:
  * - Initial downsampling: 4x (processes every 4th pixel) = ~13K points
@@ -184,34 +178,15 @@ fun main() {
                 val depthData = kinect.depthCamera.getDepthMillimeters()
 
                 if (depthData != null && kinect.depthCamera.framesReceived > 0) {
-                    // Step 2: Generate point cloud
+                    // Step 2: Generate point cloud - SIMPLIFIED (show ALL valid points)
                     points.clear()
                     colors.clear()
-                    minDepth = DEPTH_MAX  // Start with max, find minimum valid depth
-                    var maxDepth = DEPTH_MIN
+                    minDepth = DEPTH_MAX
+                    maxDepthForCloud = 0.0
 
                     // Depth camera specs
                     val depthWidth = 512
                     val depthHeight = 424
-
-                    for (y in 0 until depthHeight step downsample) {
-                        for (x in 0 until depthWidth step downsample) {
-                            val depthIdx = (y * depthWidth + x) * 4  // 4 bytes per float
-                            if (depthIdx + 3 < depthData.capacity()) {
-                                val depthFloat = depthData.getFloat(depthIdx)
-                                val depthMm = depthFloat.toDouble()
-
-                                // Filter out invalid/noise readings below Kinect V2's minimum range
-                                if (depthMm >= DEPTH_MIN && depthMm <= DEPTH_MAX && !depthMm.isNaN()) {
-                                    minDepth = minOf(minDepth, depthMm)
-                                    maxDepth = maxOf(maxDepth, depthMm)
-                                }
-                            }
-                        }
-                    }
-
-                    // Focus on closest object: show points within DEPTH_RANGE of minimum
-                    maxDepthForCloud = minOf(minDepth + DEPTH_RANGE, DEPTH_MAX)
 
                     if (!isPaused) {
                         for (y in 0 until depthHeight step downsample) {
@@ -221,11 +196,15 @@ fun main() {
                                     val depthFloat = depthData.getFloat(depthIdx)
                                     val depthMm = depthFloat.toDouble()
 
-                                    // Filter: only show closest object (within DEPTH_RANGE from minimum)
-                                    if (depthMm >= minDepth && depthMm <= maxDepthForCloud && !depthMm.isNaN()) {
+                                    // Show ALL valid points (just exclude NaN and zero)
+                                    if (depthMm > 0 && !depthMm.isNaN()) {
                                         val point3D = unProject(x, y, depthMm)
                                         points.add(point3D)
-                                        colors.add(getColorForDepth(depthMm, minDepth, maxDepthForCloud))
+                                        colors.add(ColorRGBa.WHITE)  // Single color for simplicity
+
+                                        // Track min/max for stats
+                                        minDepth = minOf(minDepth, depthMm)
+                                        maxDepthForCloud = maxOf(maxDepthForCloud, depthMm)
                                     }
                                 }
                             }
