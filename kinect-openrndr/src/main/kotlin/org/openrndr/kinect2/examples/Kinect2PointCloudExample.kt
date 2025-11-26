@@ -187,8 +187,8 @@ fun main() {
                     // Step 2: Generate point cloud
                     points.clear()
                     colors.clear()
-                    minDepth = Double.MAX_VALUE
-                    var maxDepth = 0.0
+                    minDepth = DEPTH_MAX  // Start with max, find minimum valid depth
+                    var maxDepth = DEPTH_MIN
 
                     // Depth camera specs
                     val depthWidth = 512
@@ -201,7 +201,8 @@ fun main() {
                                 val depthFloat = depthData.getFloat(depthIdx)
                                 val depthMm = depthFloat.toDouble()
 
-                                if (depthMm > 0 && !depthMm.isNaN()) {
+                                // Filter out invalid/noise readings below Kinect V2's minimum range
+                                if (depthMm >= DEPTH_MIN && depthMm <= DEPTH_MAX && !depthMm.isNaN()) {
                                     minDepth = minOf(minDepth, depthMm)
                                     maxDepth = maxOf(maxDepth, depthMm)
                                 }
@@ -275,8 +276,11 @@ fun main() {
                                 )
                             }
 
+                            // Use local variable for closure (avoids smart cast issues)
+                            val vb = pointCloudVB!!
+
                             // Upload point positions and colors to GPU
-                            pointCloudVB.put {
+                            vb.put {
                                 for (i in points.indices) {
                                     write(points[i])
                                     write(colors[i])
@@ -290,7 +294,7 @@ fun main() {
                                     x_fill.a = 1.0;
                                 """
                             }
-                            drawer.vertexBuffer(pointCloudVB, DrawPrimitive.POINTS)
+                            drawer.vertexBuffer(vb, DrawPrimitive.POINTS)
                             drawer.shadeStyle = null
                         }
                     }
