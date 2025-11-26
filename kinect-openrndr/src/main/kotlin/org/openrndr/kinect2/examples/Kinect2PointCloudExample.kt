@@ -2,7 +2,7 @@ package org.openrndr.kinect2.examples
 
 import org.openrndr.application
 import org.openrndr.color.ColorRGBa
-import org.openrndr.draw.isolated
+import org.openrndr.draw.*
 import org.openrndr.extra.camera.Orbital
 import org.openrndr.kinect2.Kinect2
 import org.openrndr.kinect2.Kinect2Manager
@@ -39,10 +39,11 @@ import com.kinect.jni.PipelineType
  * - Red: Farthest visible points (up to 1.5m from nearest surface)
  *
  * **Performance Notes**:
- * - Initial downsampling: 2x (processes every 2nd pixel)
- * - Downsampling 2x reduces point count by 75% but retains detail
- * - Point cloud generation is CPU-bound (not GPU)
- * - For optimal performance, keep downsampling ≥ 2x
+ * - Initial downsampling: 4x (processes every 4th pixel) = ~13K points
+ * - Uses GPU VertexBuffer batching for 10-100x rendering speed vs individual draws
+ * - Point cloud generation is CPU-bound, rendering is GPU-accelerated
+ * - Adjust downsampling with +/- keys for performance/quality tradeoff
+ * - 1x = ~217K points (slow), 2x = ~54K points, 4x = ~13K points (smooth)
  */
 fun main() {
     // Configuration constants
@@ -50,7 +51,7 @@ fun main() {
     val DEPTH_MIN = 500.0     // mm (0.5m)
     val DEPTH_MAX = 5000.0    // mm (5m)
     val DEPTH_RANGE = 1500.0  // mm (1.5m) - show points within this range from closest
-    val DOWNSAMPLE_INITIAL = 2  // Lower initial downsampling for more points
+    val DOWNSAMPLE_INITIAL = 4  // Balance between detail and performance
     val DOWNSAMPLE_MIN = 1
     val DOWNSAMPLE_MAX = 8
 
@@ -81,6 +82,9 @@ fun main() {
             var maxDepthForCloud = DEPTH_MAX
             var downsample = DOWNSAMPLE_INITIAL
             var isPaused = false
+
+            // GPU vertex buffer for efficient point rendering
+            var pointCloudVB: VertexBuffer? = null
 
             // Intrinsic camera parameters (Kinect V2 depth camera)
             // These are typical values; adjust based on calibration
@@ -256,16 +260,37 @@ fun main() {
                         drawer.stroke = ColorRGBa.BLUE
                         drawer.lineSegment(Vector3.ZERO, Vector3(0.0, 0.0, 0.5))
 
-                        // Draw point cloud as dots
+                        // Draw point cloud using GPU vertex buffer (much faster than individual draws)
                         if (points.isNotEmpty()) {
-                            for (i in points.indices) {
-                                drawer.fill = colors[i]
-                                drawer.stroke = null
-                                // Draw small rectangles as point surrogates (circles in 3D space aren't natively supported)
-                                val pos = points[i]
-                                val scale = 0.003
-                                drawer.rectangle(pos.x - scale, pos.y - scale, scale * 2, scale * 2)
+                            // Recreate vertex buffer if size changed
+                            if (pointCloudVB == null || pointCloudVB!!.vertexCount != points.size) {
+                                pointCloudVB?.destroy()
+                                pointCloudVB = vertexBuffer(
+                                    vertexFormat {
+                                        position(3)
+                                        color(4)
+                                    },
+                                    points.size
+                                )
                             }
+
+                            // Upload point positions and colors to GPU
+                            pointCloudVB!!.put {
+                                for (i in points.indices) {
+                                    write(points[i])
+                                    write(colors[i])
+                                }
+                            }
+
+                            // Draw all points in single GPU call (10-100x faster than individual draws)
+                            drawer.shadeStyle = shadeStyle {
+                                fragmentTransform = """
+                                    x_fill.rgb = va_color.rgb;
+                                    x_fill.a = 1.0;
+                                """
+                            }
+                            drawer.vertexBuffer(pointCloudVB!!, DrawPrimitive.POINTS)
+                            drawer.shadeStyle = null
                         }
                     }
 
