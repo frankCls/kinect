@@ -14,12 +14,12 @@ import com.kinect.jni.PipelineType
  *
  * Demonstrates real-time 3D point cloud rendering from Kinect V2 depth data.
  *
- * **What it shows**: Complete 3D point cloud from Kinect sensor.
- * Shows ALL valid depth points in white for straightforward visualization.
+ * **What it shows**: Complete 3D point cloud from Kinect sensor with real RGB colors.
+ * Shows ALL valid depth points mapped to their actual RGB colors from the color camera.
  *
  * Features:
  * - Complete 3D point cloud from all valid depth readings
- * - Single white color for clear visualization
+ * - Real RGB colors mapped from Kinect's 1920x1080 color camera
  * - Interactive 3D camera controls
  * - Real-time statistics display
  * - Performance optimization via downsampling
@@ -174,19 +174,22 @@ fun main() {
                 // Background
                 drawer.clear(ColorRGBa.BLACK)
 
-                // Step 1: Get raw depth data in millimeters (thread-safe)
+                // Step 1: Get raw depth and color data (thread-safe)
                 val depthData = kinect.depthCamera.getDepthMillimeters()
+                val colorData = kinect.colorCamera.getDataBuffer()
 
-                if (depthData != null && kinect.depthCamera.framesReceived > 0) {
+                if (depthData != null && colorData != null && kinect.depthCamera.framesReceived > 0) {
                     // Step 2: Generate point cloud - SIMPLIFIED (show ALL valid points)
                     points.clear()
                     colors.clear()
                     minDepth = DEPTH_MAX
                     maxDepthForCloud = 0.0
 
-                    // Depth camera specs
+                    // Camera specs
                     val depthWidth = 512
                     val depthHeight = 424
+                    val colorWidth = 1920
+                    val colorHeight = 1080
 
                     if (!isPaused) {
                         for (y in 0 until depthHeight step downsample) {
@@ -200,7 +203,22 @@ fun main() {
                                     if (depthMm > 0 && !depthMm.isNaN()) {
                                         val point3D = unProject(x, y, depthMm)
                                         points.add(point3D)
-                                        colors.add(ColorRGBa.WHITE)  // Single color for simplicity
+
+                                        // Map depth pixel to color pixel (simple scaling)
+                                        val colorX = (x * colorWidth / depthWidth).coerceIn(0, colorWidth - 1)
+                                        val colorY = (y * colorHeight / depthHeight).coerceIn(0, colorHeight - 1)
+                                        val colorIdx = (colorY * colorWidth + colorX) * 3  // RGB = 3 bytes per pixel
+
+                                        // Sample RGB color from color camera
+                                        val color = if (colorIdx + 2 < colorData.capacity()) {
+                                            val r = (colorData[colorIdx].toInt() and 0xFF) / 255.0
+                                            val g = (colorData[colorIdx + 1].toInt() and 0xFF) / 255.0
+                                            val b = (colorData[colorIdx + 2].toInt() and 0xFF) / 255.0
+                                            ColorRGBa(r, g, b)
+                                        } else {
+                                            ColorRGBa.WHITE  // Fallback
+                                        }
+                                        colors.add(color)
 
                                         // Track min/max for stats
                                         minDepth = minOf(minDepth, depthMm)
