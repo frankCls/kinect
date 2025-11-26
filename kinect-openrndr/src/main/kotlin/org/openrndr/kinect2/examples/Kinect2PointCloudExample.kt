@@ -175,8 +175,8 @@ fun main() {
                 // Background
                 drawer.clear(ColorRGBa.BLACK)
 
-                // Step 1: Get depth data from camera buffer (thread-safe)
-                val depthData = kinect.depthCamera.getDataBuffer()
+                // Step 1: Get raw depth data in millimeters (thread-safe)
+                val depthData = kinect.depthCamera.getDepthMillimeters()
 
                 if (depthData != null && kinect.depthCamera.framesReceived > 0) {
                     // Step 2: Generate point cloud
@@ -191,10 +191,10 @@ fun main() {
 
                     for (y in 0 until depthHeight step downsample) {
                         for (x in 0 until depthWidth step downsample) {
-                            val depthIdx = (y * depthWidth + x) * 2
-                            if (depthIdx + 1 < depthData.capacity()) {
-                                val shortDepth = depthData.getShort(depthIdx)
-                                val depthMm = shortDepth.toDouble()
+                            val depthIdx = (y * depthWidth + x) * 4  // 4 bytes per float
+                            if (depthIdx + 3 < depthData.capacity()) {
+                                val depthFloat = depthData.getFloat(depthIdx)
+                                val depthMm = depthFloat.toDouble()
 
                                 if (depthMm > 0 && !depthMm.isNaN()) {
                                     minDepth = minOf(minDepth, depthMm)
@@ -210,10 +210,10 @@ fun main() {
                     if (!isPaused) {
                         for (y in 0 until depthHeight step downsample) {
                             for (x in 0 until depthWidth step downsample) {
-                                val depthIdx = (y * depthWidth + x) * 2
-                                if (depthIdx + 1 < depthData.capacity()) {
-                                    val shortDepth = depthData.getShort(depthIdx)
-                                    val depthMm = shortDepth.toDouble()
+                                val depthIdx = (y * depthWidth + x) * 4  // 4 bytes per float
+                                if (depthIdx + 3 < depthData.capacity()) {
+                                    val depthFloat = depthData.getFloat(depthIdx)
+                                    val depthMm = depthFloat.toDouble()
 
                                     // Filter: only show closest object (within DEPTH_RANGE from minimum)
                                     if (depthMm >= minDepth && depthMm <= maxDepthForCloud && !depthMm.isNaN()) {
