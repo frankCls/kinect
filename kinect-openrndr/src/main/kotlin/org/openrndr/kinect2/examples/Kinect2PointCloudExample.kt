@@ -146,8 +146,9 @@ fun main() {
 
             // Setup 3D camera
             val camera = Orbital()
-            camera.eye = Vector3(0.0, 0.0, -2.0)  // Camera position: 2m back from origin
-            camera.lookAt = Vector3.ZERO          // Look at origin
+            // Point cloud Z values are positive (0.5m to 4.5m), so camera must be farther in positive Z
+            camera.eye = Vector3(0.0, 0.0, 3.0)  // Camera position: 3m in front, looking back at point cloud
+            camera.lookAt = Vector3(0.0, 0.0, 1.5)  // Look at center of typical depth range
             camera.fov = 60.0                     // Field of view
             camera.near = 0.01                    // Near clip plane
             camera.far = 10.0                     // Far clip plane (10m)
@@ -157,8 +158,8 @@ fun main() {
             keyboard.keyDown.listen { event ->
                 when (event.name) {
                     "r" -> {
-                        camera.eye = Vector3(0.0, 0.0, -2.0)
-                        camera.lookAt = Vector3.ZERO
+                        camera.eye = Vector3(0.0, 0.0, 3.0)
+                        camera.lookAt = Vector3(0.0, 0.0, 1.5)
                     }
                     "+" -> downsample = (downsample - 1).coerceAtLeast(DOWNSAMPLE_MIN)
                     "-" -> downsample = (downsample + 1).coerceAtMost(DOWNSAMPLE_MAX)
@@ -275,7 +276,7 @@ fun main() {
                             }
 
                             // Upload point positions and colors to GPU
-                            pointCloudVB!!.put {
+                            pointCloudVB.put {
                                 for (i in points.indices) {
                                     write(points[i])
                                     write(colors[i])
@@ -289,7 +290,7 @@ fun main() {
                                     x_fill.a = 1.0;
                                 """
                             }
-                            drawer.vertexBuffer(pointCloudVB!!, DrawPrimitive.POINTS)
+                            drawer.vertexBuffer(pointCloudVB, DrawPrimitive.POINTS)
                             drawer.shadeStyle = null
                         }
                     }
