@@ -8,6 +8,7 @@ import org.openrndr.kinect2.Kinect2
 import org.openrndr.kinect2.Kinect2Manager
 import org.openrndr.math.Vector3
 import com.kinect.jni.PipelineType
+import org.slf4j.LoggerFactory
 
 /**
  * Kinect V2 Point Cloud Visualization Example
@@ -40,6 +41,8 @@ import com.kinect.jni.PipelineType
  * - 1x = ~217K points (slow), 2x = ~54K points, 4x = ~13K points (smooth)
  */
 fun main() {
+    val logger = LoggerFactory.getLogger("Kinect2PointCloudExample")
+
     // Configuration constants
     val TARGET_FPS = 30.0
     val DEPTH_MIN = 500.0     // mm (0.5m)
@@ -94,33 +97,7 @@ fun main() {
                 return Vector3(xVal, -yVal, z)  // Negate Y for standard coordinate system
             }
 
-            fun getColorForDepth(depth: Double, minD: Double, maxD: Double): ColorRGBa {
-                val normalized = (depth - minD) / (maxD - minD).coerceAtLeast(0.001)
-                return when {
-                    normalized < 0.25 -> {
-                        // Blue to Cyan
-                        val t = normalized / 0.25
-                        ColorRGBa(0.0, t, 1.0)
-                    }
-                    normalized < 0.5 -> {
-                        // Cyan to Green
-                        val t = (normalized - 0.25) / 0.25
-                        ColorRGBa(0.0, 1.0, 1.0 - t)
-                    }
-                    normalized < 0.75 -> {
-                        // Green to Yellow
-                        val t = (normalized - 0.5) / 0.25
-                        ColorRGBa(t, 1.0, 0.0)
-                    }
-                    else -> {
-                        // Yellow to Red
-                        val t = (normalized - 0.75) / 0.25
-                        ColorRGBa(1.0, 1.0 - t, 0.0)
-                    }
-                }
-            }
-
-            println("=== Kinect V2 Point Cloud Visualization ===")
+            logger.info("=== Kinect V2 Point Cloud Visualization ===")
             println("Found ${Kinect2Manager.getDeviceCount()} Kinect V2 device(s)")
             println("\nControls:")
             println("  - Mouse: Orbit")
@@ -191,7 +168,7 @@ fun main() {
                         val b = (registeredBuffer.get(centerIdx).toInt() and 0xFF)
                         val g = (registeredBuffer.get(centerIdx + 1).toInt() and 0xFF)
                         val r = (registeredBuffer.get(centerIdx + 2).toInt() and 0xFF)
-                        println("Registration: center pixel RGB: ($r, $g, $b)")
+                        logger.debug("Registration: center pixel RGB: ($r, $g, $b)")
                     }
 
                     // Generate point cloud with registered colors
@@ -237,7 +214,7 @@ fun main() {
                         }
                     }
                     if (frameCount % 30 == 0) {
-                        println("Generated ${points.size} points (validPoints=$validPoints), minDepth=${minDepth}mm, maxDepth=${maxDepthForCloud}mm")
+                        logger.debug("Generated ${points.size} points (validPoints=$validPoints), minDepth=${minDepth}mm, maxDepth=${maxDepthForCloud}mm")
                     }
 
                     // Draw 3D scene
@@ -325,20 +302,3 @@ fun main() {
         }
     }
 }
-
-// Camera parameters as lazy properties
-private val intrinsics by lazy {
-    CameraIntrinsics(
-        fx = 365.0,
-        fy = 365.0,
-        cx = 256.0,
-        cy = 212.0
-    )
-}
-
-data class CameraIntrinsics(
-    val fx: Double,
-    val fy: Double,
-    val cx: Double,
-    val cy: Double
-)

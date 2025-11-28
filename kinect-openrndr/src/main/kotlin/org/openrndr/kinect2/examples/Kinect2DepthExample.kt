@@ -5,6 +5,7 @@ import org.openrndr.color.ColorRGBa
 import org.openrndr.kinect2.Kinect2
 import org.openrndr.kinect2.Kinect2Manager
 import com.kinect.jni.PipelineType
+import org.slf4j.LoggerFactory
 
 /**
  * Simple example showing only the depth camera from Kinect V2.
@@ -47,7 +48,10 @@ import com.kinect.jni.PipelineType
  * ./run-example.sh depth
  * ```
  */
-fun main() = application {
+fun main() {
+    val logger = LoggerFactory.getLogger("Kinect2DepthExample")
+
+    application {
     configure {
         width = 512
         height = 424
@@ -58,13 +62,13 @@ fun main() = application {
     program {
         // Check for devices
         if (!Kinect2Manager.hasDevices()) {
-            println("ERROR: No Kinect V2 devices found!")
+            logger.error("No Kinect V2 devices found!")
             application.exit()
             return@program
         }
 
-        println("Found ${Kinect2Manager.getDeviceCount()} Kinect V2 device(s)")
-        println("Using CPU pipeline (safe for OPENRNDR)")
+        logger.info("Found ${Kinect2Manager.getDeviceCount()} Kinect V2 device(s)")
+        logger.info("Using CPU pipeline (safe for OPENRNDR)")
 
         // Create Kinect2 extension with minimal configuration
         val kinect = extend(Kinect2()) {
@@ -87,8 +91,9 @@ fun main() = application {
             if (seconds - lastPrintTime >= 1.0) {
                 lastPrintTime = seconds
                 val fps = if (seconds > 0) frameCount / seconds else 0.0
-                println("═══ [${seconds.toInt()}s] Frames: ${kinect.depthCamera.framesReceived} | FPS: ${"%.1f".format(fps)} | Timestamp: ${kinect.depthCamera.lastTimestamp}ms ═══")
+                logger.info("[${seconds.toInt()}s] Frames: ${kinect.depthCamera.framesReceived} | FPS: ${"%.1f".format(fps)} | Timestamp: ${kinect.depthCamera.lastTimestamp}ms")
             }
         }
+    }
     }
 }

@@ -5,6 +5,7 @@ import org.openrndr.color.ColorRGBa
 import org.openrndr.kinect2.Kinect2
 import org.openrndr.kinect2.Kinect2Manager
 import com.kinect.jni.PipelineType
+import org.slf4j.LoggerFactory
 
 /**
  * Complete example demonstrating all Kinect V2 streams with OPENRNDR.
@@ -66,7 +67,10 @@ import com.kinect.jni.PipelineType
  *     -Djava.library.path=kinect-jni/target:$HOME/freenect2/lib
  * ```
  */
-fun main() = application {
+fun main() {
+    val logger = LoggerFactory.getLogger("Kinect2Example")
+
+    application {
     configure {
         width = 1920
         height = 424
@@ -74,22 +78,21 @@ fun main() = application {
     }
 
     program {
-        // Print device information
-        println("=== Kinect V2 Device Information ===")
-        println("Library version: ${Kinect2Manager.getLibraryVersion()}")
-        println("Devices found: ${Kinect2Manager.getDeviceCount()}")
+        logger.info("=== Kinect V2 Device Information ===")
+        logger.info("Library version: ${Kinect2Manager.getLibraryVersion()}")
+        logger.info("Devices found: ${Kinect2Manager.getDeviceCount()}")
 
         val devices = Kinect2Manager.getKinectsV2()
         devices.forEachIndexed { index, device ->
-            println("  [$index] Serial: ${device.serial}")
+            logger.info("  [$index] Serial: ${device.serial}")
         }
 
         if (!Kinect2Manager.hasDevices()) {
-            println("ERROR: No Kinect V2 devices found!")
-            println("Please check:")
-            println("  - Kinect is connected to USB 3.0 port")
-            println("  - Kinect power supply is connected")
-            println("  - libfreenect2 is installed correctly")
+            logger.error("No Kinect V2 devices found!")
+            logger.error("Please check:")
+            logger.error("  - Kinect is connected to USB 3.0 port")
+            logger.error("  - Kinect power supply is connected")
+            logger.error("  - libfreenect2 is installed correctly")
             application.exit()
             return@program
         }
@@ -103,10 +106,9 @@ fun main() = application {
             pipelineType = PipelineType.CPU     // Use CPU pipeline (safe for OPENRNDR)
         }
 
-        println("\n=== Starting Kinect2 Extension ===")
-        println("Pipeline: ${kinect.pipelineType}")
-        println("Streams enabled: Depth, Color, IR")
-        println("\nPress ESC to exit")
+        logger.info("=== Starting Kinect2 Extension ===")
+        logger.info("Pipeline: ${kinect.pipelineType}")
+        logger.info("Streams enabled: Depth, Color, IR")
 
         extend {
             // Clear background
@@ -134,5 +136,6 @@ fun main() = application {
             drawer.text("Color frames: ${kinect.colorCamera.framesReceived}", 522.0, 410.0)
             drawer.text("IR frames: ${kinect.irCamera.framesReceived}", 522.0 + colorWidth, 410.0)
         }
+    }
     }
 }

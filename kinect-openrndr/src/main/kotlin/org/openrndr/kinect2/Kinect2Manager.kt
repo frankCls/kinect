@@ -80,44 +80,4 @@ object Kinect2Manager {
      * @return true if at least one device is available
      */
     fun hasDevices(): Boolean = getDeviceCount() > 0
-
-    /**
-     * Get default device information (first device).
-     *
-     * @return device info, or null if no devices available
-     */
-    fun getDefaultDevice(): Kinect2DeviceInfo? = getKinectsV2().firstOrNull()
-
-    /**
-     * Get device information by index.
-     *
-     * @param index device index (0-based)
-     * @return device info, or null if index out of range
-     */
-    fun getDevice(index: Int): Kinect2DeviceInfo? = getKinectsV2().getOrNull(index)
-
-    /**
-     * Get device information by serial number.
-     *
-     * @param serial device serial number
-     * @return device info, or null if not found
-     */
-    fun getDeviceBySerial(serial: String): Kinect2DeviceInfo? =
-        getKinectsV2().firstOrNull { it.serial == serial }
-
-    /**
-     * Print device information to console for debugging.
-     */
-    fun printDeviceInfo() {
-        println("=== Kinect V2 Device Information ===")
-        println("Library loaded: ${isLibraryLoaded()}")
-        println("Library version: ${getLibraryVersion() ?: "N/A"}")
-
-        val devices = getKinectsV2()
-        println("Devices found: ${devices.size}")
-
-        devices.forEachIndexed { index, device ->
-            println("  [$index] Serial: ${device.serial}")
-        }
-    }
 }

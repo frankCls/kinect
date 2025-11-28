@@ -6,10 +6,6 @@ import com.kinect.jni.KinectDevice
 import com.kinect.jni.Frame
 import com.kinect.jni.FrameType
 import com.kinect.jni.PipelineType
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.openrndr.Extension
@@ -70,31 +66,8 @@ class Kinect2 : Extension {
     lateinit var irCamera: Kinect2IRCamera
         private set
 
-    /**
-     * Get the underlying KinectDevice for advanced operations like Registration.
-     * @return KinectDevice instance, or null if not initialized
-     */
-    fun getDevice(): KinectDevice? = device
-
     // Registered color buffer (512x424 BGRX pixels aligned to depth space)
     private val registeredColorBuffer = ByteBuffer.allocateDirect(512 * 424 * 4)
-
-    /**
-     * Get synchronized raw depth and color frame data for registration.
-     * Returns a pair of ByteBuffers: (depth millimeters as floats, color BGRX).
-     * Depth buffer: 512x424 floats (4 bytes each), LITTLE_ENDIAN
-     * Color buffer: 1920x1080 BGRX (4 bytes per pixel)
-     * Returns null if frames not yet available.
-     */
-    fun getLatestRawFrames(): Pair<ByteBuffer?, ByteBuffer?>? {
-        if (!::depthCamera.isInitialized || !::colorCamera.isInitialized) {
-            return null
-        }
-        return Pair(
-            depthCamera.getDepthMillimeters(),
-            colorCamera.getRawColorData()
-        )
-    }
 
     /**
      * Get the registered color buffer (512x424 BGRX) aligned to depth coordinate space.
@@ -113,22 +86,17 @@ class Kinect2 : Extension {
     private var acquisitionThread: Thread? = null
     @Volatile private var running = false
 
-    // Coroutine scope for frame processing
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-
     override fun setup(program: Program) {
         this.program = program
         logger.info("Kinect2 extension setup starting...")
         logger.info("Pipeline type: $pipelineType (CPU recommended for OPENRNDR)")
 
         try {
-            // Check native library
             if (!Freenect.isLibraryLoaded()) {
                 throw RuntimeException("Kinect native library not loaded")
             }
             logger.info("libfreenect2 version: ${Freenect.getVersion()}")
 
-            // Get singleton context and open device
             val ctx = FreenectContextManager.getContext()
 
             val deviceCount = ctx.getDeviceCount()
@@ -138,7 +106,6 @@ class Kinect2 : Extension {
                 throw RuntimeException("No Kinect V2 devices found")
             }
 
-            // Open device
             device = if (deviceSerial != null) {
                 logger.info("Opening device with serial: $deviceSerial")
                 ctx.openDevice(deviceSerial, pipelineType)
@@ -153,7 +120,6 @@ class Kinect2 : Extension {
             logger.info("Device opened successfully")
             logger.info("Firmware version: ${dev.getFirmwareVersion()}")
 
-            // Initialize camera interfaces
             depthCamera = Kinect2DepthCamera()
             colorCamera = Kinect2ColorCamera()
             irCamera = Kinect2IRCamera()
@@ -291,9 +257,6 @@ class Kinect2 : Extension {
             runCatching { it.join(1000) }
         }
 
-        // Cancel coroutine scope
-        scope.cancel()
-
         // Close device
         device?.let {
             runCatching { it.close() }
@@ -301,9 +264,7 @@ class Kinect2 : Extension {
                 .onFailure { e -> logger.error("Error closing device", e) }
         }
 
-        // Context is managed by FreenectContextManager singleton
-        // It will be automatically cleaned up on JVM shutdown
-        // Do NOT close it here - other Kinect2 instances may be using it
+        // Context is managed by FreenectContextManager singleton and will be automatically cleaned up on JVM shutdown
 
         // Clean up camera resources
         runCatching { if (::depthCamera.isInitialized) depthCamera.dispose() }
@@ -545,12 +506,7 @@ class Kinect2DepthCamera : Kinect2Camera(
         val data = frame.data.order(ByteOrder.LITTLE_ENDIAN)
         data.position(0)
 
-        // Debug: sample center pixel and find closest pixel every 30 frames
         val shouldLog = (frame.sequence % 30L == 0L)
-        var minDepth = Int.MAX_VALUE
-        var minX = -1
-        var minY = -1
-        var validPixels = 0
 
         // Prepare raw depth back buffer for mm values
         val rawBack = backDepthBuffer
@@ -574,24 +530,7 @@ class Kinect2DepthCamera : Kinect2Camera(
 
                 val dstIdx = (height - 1 - y) * width + x
 
-//                // Track closest pixel for diagnostics (ignore 1-2mm as sensor noise/damage)
-//                if (shouldLog && depthMm > 0 && depthMm < 65535) {
-//                    validPixels++
-//                    if (depthMm > 100 && depthMm < minDepth) {  // Ignore 1-2mm readings
-//                        minDepth = depthMm
-//                        minX = x
-//                        minY = y
-//                    }
-//                }
-
-                // Depth visualization with gamma correction:
-                // - Close objects (500-1500mm): BRIGHT (200-255 gray) - user should appear white/bright
-                // - Mid-range objects (1500-4000mm): GREY (100-200 gray)
-                // - Far objects (4000-8000mm): DARK (0-100 gray) - background should be dark grey
-                // - Invalid/no data (0mm): BLACK (0)
-                // - Very far (>8000mm): BLACK (0)
-                //
-                // Uses pre-calculated gamma LUT for performance
+                // Apply depth visualization with gamma correction
                 val gray = depthGammaTable[depthMm.coerceIn(0, 65535)]
                 val grayValue = gray.toByte()
 
@@ -606,14 +545,6 @@ class Kinect2DepthCamera : Kinect2Camera(
                 buffer.put(grayValue)  // B
                 buffer.put(255.toByte())  // A
             }
-        }
-
-        // Log closest pixel found
-        if (shouldLog && minX >= 0) {
-            val closestGray = depthGammaTable[minDepth.coerceIn(0, 65535)]
-            val totalPixels = width * height
-            val validPercent = (validPixels * 100.0) / totalPixels
-            logger.debug("DEPTH Closest pixel at ($minX, $minY): depthMm=${minDepth}mm, gray=$closestGray (${closestGray*100/255}%) | Valid pixels: $validPixels/$totalPixels (${String.format("%.1f", validPercent)}%)")
         }
 
         // Swap raw depth buffers so readers see the latest mm values
