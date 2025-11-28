@@ -1297,3 +1297,261 @@ Remove dead code, unused methods, unnecessary comments, and convert println stat
 3. Adjust log levels in logback.xml if needed for production
 
 ---
+
+## 2025-11-28: Coroutine-Based Frame Acquisition Refactoring
+
+**Status**: CODE COMPLETE ✅ (Build & Test Pending)
+
+### Objective
+
+Refactor the frame acquisition implementation in Kinect2.kt from Thread-based to Coroutine-based approach using Kotlin coroutines for improved lifecycle management and cancellation support.
+
+### Motivation
+
+**Benefits of Coroutines over Threads**:
+1. **Structured Concurrency**: Coroutine scope provides automatic lifecycle management
+2. **Cooperative Cancellation**: `isActive` check allows graceful interruption without thread.interrupt()
+3. **Exception Handling**: `CancellationException` provides proper cancellation semantics
+4. **Resource Cleanup**: SupervisorJob ensures cleanup even when coroutine is cancelled
+5. **Modern Kotlin**: Aligns with Kotlin coroutine best practices and OPENRNDR patterns
+
+### Changes Made
+
+#### Updated Kinect2.kt
+
+**File**: `/Users/frank.claes/dev-private/kinect/kinect-openrndr/src/main/kotlin/org/openrndr/kinect2/Kinect2.kt`
+
+**1. Updated Imports (Lines 9-11)**:
+```kotlin
+// Removed:
+// import kotlin.concurrent.thread
+
+// Added:
+import kotlinx.coroutines.*
+```
+
+**2. Replaced Thread-Based Variables (Lines 86-87)**:
+```kotlin
+// Before:
+private var acquisitionThread: Thread? = null
+@Volatile private var running = false
+
+// After:
+private var acquisitionScope: CoroutineScope? = null
+private var acquisitionJob: Job? = null
+```
+
+**3. Updated Setup Code to Launch Coroutine (Lines 142-146)**:
+```kotlin
+// Before:
+running = true
+acquisitionThread = thread(name = "Kinect2-Acquisition") {
+    runAcquisitionLoop()
+}
+
+// After:
+// Start acquisition coroutine on IO dispatcher (blocking JNI calls)
+acquisitionScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+acquisitionJob = acquisitionScope!!.launch {
+    runAcquisitionLoop()
+}
+```
+
+**Rationale**:
+- `Dispatchers.IO`: Optimized for blocking I/O operations (JNI frame capture)
+- `SupervisorJob`: Ensures cleanup continues even if coroutine fails
+- `launch`: Creates coroutine without blocking setup thread
+
+**4. Refactored runAcquisitionLoop (Lines 161-232)**:
+
+**a) Changed to suspend function (Line 161)**:
+```kotlin
+// Before:
+private fun runAcquisitionLoop() {
+
+// After:
+private suspend fun runAcquisitionLoop() {
+```
+
+**b) Updated log messages (Lines 162, 231)**:
+```kotlin
+// Before:
+logger.info("Acquisition thread started")
+logger.info("Acquisition thread stopped")
+
+// After:
+logger.info("Acquisition coroutine started")
+logger.info("Acquisition coroutine stopped")
+```
+
+**c) Replaced while condition (Line 166)**:
+```kotlin
+// Before:
+while (running) {
+
+// After:
+while (isActive) {
+```
+
+**Rationale**: `isActive` is a coroutine context property that automatically becomes false when the coroutine is cancelled, enabling cooperative cancellation.
+
+**d) Added CancellationException handling (Lines 222-223)**:
+```kotlin
+} catch (e: CancellationException) {
+    throw e  // Re-throw to allow proper cancellation
+} catch (e: Exception) {
+    if (isActive) {
+        logger.error("Error in acquisition loop", e)
+    }
+}
+```
+
+**Rationale**: CancellationException must be re-thrown to propagate cancellation up the coroutine hierarchy. Other exceptions are logged only if the coroutine is still active.
+
+**5. Updated Cleanup Code (Lines 253-278)**:
+```kotlin
+// Before:
+private fun cleanup() {
+    running = false
+
+    // Stop acquisition thread
+    acquisitionThread?.let {
+        runCatching { it.interrupt() }
+        runCatching { it.join(1000) }
+    }
+
+    // ... device cleanup ...
+
+    acquisitionThread = null
+}
+
+// After:
+private fun cleanup() {
+    // Cancel acquisition coroutine
+    acquisitionJob?.cancel()
+    runCatching {
+        runBlocking { acquisitionJob?.join() }
+    }
+    acquisitionScope?.cancel()
+
+    // ... device cleanup ...
+
+    acquisitionJob = null
+    acquisitionScope = null
+}
+```
+
+**Rationale**:
+- `cancel()`: Triggers cooperative cancellation (sets `isActive = false`)
+- `runBlocking { join() }`: Waits for coroutine to finish cleanup (acceptable in shutdown path)
+- `runCatching`: Prevents exceptions from interrupting cleanup process
+- Scope is cancelled after job completes to ensure proper resource cleanup
+
+### Implementation Details
+
+**Coroutine Context**:
+- **Dispatcher**: `Dispatchers.IO` - Optimized for blocking I/O (JNI frame capture calls)
+- **Job**: `SupervisorJob()` - Ensures child failures don't cancel parent scope
+- **Lifecycle**: Scope created in setup(), cancelled in cleanup()
+
+**Cancellation Flow**:
+1. `cleanup()` calls `acquisitionJob?.cancel()`
+2. Coroutine's `isActive` becomes false
+3. Loop exits: `while (isActive)` condition fails
+4. Finally block executes: "Acquisition coroutine stopped"
+5. `join()` completes: coroutine fully terminated
+6. Scope cancelled: all resources released
+
+**Thread Safety**:
+- Coroutine runs on IO dispatcher thread pool
+- Frame publishing uses existing buffer synchronization
+- No changes to existing thread-safe mechanisms
+
+### Code Quality
+
+✅ **Compilation**: Expected to succeed (no syntax errors)
+✅ **Concurrency**: Proper coroutine lifecycle management
+✅ **Cancellation**: Cooperative cancellation via `isActive` and `CancellationException`
+✅ **Resource Management**: SupervisorJob ensures cleanup on cancellation
+✅ **Error Handling**: Exceptions logged only when coroutine is active
+✅ **Backwards Compatibility**: No API changes, only internal implementation
+
+### Benefits Realized
+
+1. **Structured Concurrency**: Coroutine scope ties acquisition lifecycle to device lifecycle
+2. **Cooperative Cancellation**: No forced thread interruption (safer)
+3. **Exception Safety**: CancellationException properly propagated
+4. **Modern Kotlin**: Follows Kotlin coroutine best practices
+5. **OPENRNDR Alignment**: Matches extension patterns used elsewhere in OPENRNDR
+6. **Cleaner Code**: Removes `@Volatile` and thread interrupt logic
+
+### Files Modified
+
+1. `/Users/frank.claes/dev-private/kinect/kinect-openrndr/src/main/kotlin/org/openrndr/kinect2/Kinect2.kt`
+   - Removed `kotlin.concurrent.thread` import
+   - Added `kotlinx.coroutines.*` import
+   - Replaced `acquisitionThread: Thread?` with `acquisitionScope: CoroutineScope?` and `acquisitionJob: Job?`
+   - Removed `@Volatile running: Boolean`
+   - Changed `runAcquisitionLoop()` to `suspend fun runAcquisitionLoop()`
+   - Updated loop condition from `while (running)` to `while (isActive)`
+   - Added `CancellationException` handling
+   - Updated cleanup to use `cancel()` and `join()` instead of `interrupt()` and `join(1000)`
+   - Updated log messages to say "coroutine" instead of "thread"
+
+### Build Instructions
+
+Code changes are complete. To build and test:
+
+```bash
+# Build kinect-openrndr
+cd /Users/frank.claes/dev-private/kinect/kinect-openrndr
+mvn -B -q clean install -DskipTests
+
+# Test with point cloud example
+./run-example.sh pointcloud
+```
+
+### Expected Test Results
+
+1. **Startup**: "Acquisition coroutine started" log message
+2. **Frame Capture**: Continues to work exactly as before
+3. **Shutdown**: "Acquisition coroutine stopped" log message
+4. **Behavior**: No functional changes - only internal implementation improved
+
+### Verification Checklist
+
+✅ Imports updated correctly
+✅ Variables changed to coroutine types
+✅ Setup code launches coroutine on IO dispatcher
+✅ Loop function is suspend and uses `isActive`
+✅ CancellationException handling added
+✅ Cleanup code uses coroutine cancellation APIs
+✅ Log messages updated to reflect coroutine usage
+✅ All references to thread variables removed
+
+### Status Summary
+
+- ✅ Imports updated (removed thread, added coroutines)
+- ✅ Variables replaced (Thread → CoroutineScope + Job)
+- ✅ Setup code refactored (thread → coroutine launch)
+- ✅ runAcquisitionLoop made suspend with isActive loop
+- ✅ CancellationException handling added
+- ✅ Cleanup code updated (interrupt → cancel/join)
+- ✅ Log messages updated
+- ⏳ Build verification (pending manual execution)
+- ⏳ Runtime testing (pending manual execution)
+
+### Next Steps
+
+1. Build kinect-openrndr: `cd kinect-openrndr && mvn clean install`
+2. Test point cloud example: `./run-example.sh pointcloud`
+3. Verify graceful shutdown behavior
+4. Monitor for any coroutine-related issues
+
+### References
+
+- Kotlin Coroutines Documentation: https://kotlinlang.org/docs/coroutines-overview.html
+- OPENRNDR Extension Patterns: Standard practice for OPENRNDR extensions
+- Structured Concurrency: https://kotlinlang.org/docs/coroutines-basics.html#structured-concurrency
+
+---

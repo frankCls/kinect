@@ -8,6 +8,8 @@ import com.kinect.jni.FrameType
 import com.kinect.jni.PipelineType
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.*
+import kotlin.coroutines.coroutineContext
 import org.openrndr.Extension
 import org.openrndr.Program
 import org.openrndr.color.ColorRGBa
@@ -18,7 +20,6 @@ import org.openrndr.draw.colorBuffer
 import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.concurrent.thread
 import kotlin.math.pow
 
 /**
@@ -83,8 +84,8 @@ class Kinect2 : Extension {
     // Note: FreenectContext is managed by FreenectContextManager singleton
     private var device: KinectDevice? = null
     private var program: Program? = null
-    private var acquisitionThread: Thread? = null
-    @Volatile private var running = false
+    private var acquisitionScope: CoroutineScope? = null
+    private var acquisitionJob: Job? = null
 
     override fun setup(program: Program) {
         this.program = program
@@ -139,9 +140,9 @@ class Kinect2 : Extension {
             dev.start(*frameTypes.toTypedArray())
             logger.info("Streaming started for: ${frameTypes.joinToString()}")
 
-            // Start acquisition thread
-            running = true
-            acquisitionThread = thread(name = "Kinect2-Acquisition") {
+            // Start acquisition coroutine on IO dispatcher (blocking JNI calls)
+            acquisitionScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+            acquisitionJob = acquisitionScope!!.launch {
                 runAcquisitionLoop()
             }
 
@@ -158,12 +159,12 @@ class Kinect2 : Extension {
      * Frame acquisition loop running on dedicated thread.
      * Fetches frames from libfreenect2 and publishes to StateFlow.
      */
-    private fun runAcquisitionLoop() {
-        logger.info("Acquisition thread started")
+    private suspend fun runAcquisitionLoop() {
+        logger.info("Acquisition coroutine started")
         val dev = device ?: return
 
         try {
-            while (running) {
+            while (coroutineContext.isActive) {
                 try {
                     // Use synchronized frame acquisition when both depth and color are enabled
                     if (enableDepth && enableColor) {
@@ -219,14 +220,16 @@ class Kinect2 : Extension {
                         }
                     }
 
+                } catch (e: CancellationException) {
+                    throw e  // Re-throw to allow proper cancellation
                 } catch (e: Exception) {
-                    if (running) {
+                    if (coroutineContext.isActive) {
                         logger.error("Error in acquisition loop", e)
                     }
                 }
             }
         } finally {
-            logger.info("Acquisition thread stopped")
+            logger.info("Acquisition coroutine stopped")
         }
     }
 
@@ -249,13 +252,12 @@ class Kinect2 : Extension {
     }
 
     private fun cleanup() {
-        running = false
-
-        // Stop acquisition thread
-        acquisitionThread?.let {
-            runCatching { it.interrupt() }
-            runCatching { it.join(1000) }
+        // Cancel acquisition coroutine
+        acquisitionJob?.cancel()
+        runCatching {
+            runBlocking { acquisitionJob?.join() }
         }
+        acquisitionScope?.cancel()
 
         // Close device
         device?.let {
@@ -272,7 +274,8 @@ class Kinect2 : Extension {
         runCatching { if (::irCamera.isInitialized) irCamera.dispose() }
 
         device = null
-        acquisitionThread = null
+        acquisitionJob = null
+        acquisitionScope = null
     }
 }
 
