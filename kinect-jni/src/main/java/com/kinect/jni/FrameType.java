@@ -15,14 +15,14 @@ public enum FrameType {
     COLOR(1),
 
     /**
-     * Depth frame (16-bit depth in mm, 512x424, ~30 FPS).
-     */
-    DEPTH(2),
-
-    /**
      * Infrared frame (16-bit IR intensity, 512x424, ~30 FPS).
      */
-    IR(4);
+    IR(2),
+
+    /**
+     * Depth frame (16-bit depth in mm, 512x424, ~30 FPS).
+     */
+    DEPTH(4);
 
     /**
      * Native libfreenect2 frame type value.

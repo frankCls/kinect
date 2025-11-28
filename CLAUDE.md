@@ -94,7 +94,7 @@ mvn test
 ### Development instructions for CLAUDE
 
 - ***IMPORTANT!*** document every step (successes AND fails) in the docs/log.md file
-- ***ALWAYS*** use the maven-runner agent for running maven commands
+- ***ALWAYS*** use the local-maven-runner agent for running maven commands
 
 ## Development Workflow
 

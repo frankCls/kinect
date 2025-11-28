@@ -174,62 +174,73 @@ fun main() {
                 // Background
                 drawer.clear(ColorRGBa.BLACK)
 
-                // Step 1: Get raw depth and color data (thread-safe)
+                // Get depth data and registered color buffer from kinect wrapper
+                // The registered buffer is automatically populated via getSynchronizedFrames + getRegisteredBuffer
                 val depthData = kinect.depthCamera.getDepthMillimeters()
-                val colorData = kinect.colorCamera.getDataBuffer()
+                val registeredBuffer = kinect.getRegisteredColorBuffer()
 
-                if (depthData != null && colorData != null && kinect.depthCamera.framesReceived > 0) {
-                    // Step 2: Generate point cloud - SIMPLIFIED (show ALL valid points)
+                if (depthData != null && registeredBuffer != null && !isPaused) {
+                    // Camera specs
+                    val depthWidth = 512
+                    val depthHeight = 424
+
+                    // Debug: Check RGB values from center pixel
+                    if (frameCount % 30 == 0) {
+                        registeredBuffer.rewind()
+                        val centerIdx = (depthHeight / 2 * depthWidth + depthWidth / 2) * 4  // BGRX = 4 bytes
+                        val b = (registeredBuffer.get(centerIdx).toInt() and 0xFF)
+                        val g = (registeredBuffer.get(centerIdx + 1).toInt() and 0xFF)
+                        val r = (registeredBuffer.get(centerIdx + 2).toInt() and 0xFF)
+                        println("Registration: center pixel RGB: ($r, $g, $b)")
+                    }
+
+                    // Generate point cloud with registered colors
                     points.clear()
                     colors.clear()
                     minDepth = DEPTH_MAX
                     maxDepthForCloud = 0.0
 
-                    // Camera specs
-                    val depthWidth = 512
-                    val depthHeight = 424
-                    val colorWidth = 1920
-                    val colorHeight = 1080
+                    var validPoints = 0
+                    depthData.rewind()
+                    registeredBuffer.rewind()
 
-                    if (!isPaused) {
-                        for (y in 0 until depthHeight step downsample) {
-                            for (x in 0 until depthWidth step downsample) {
-                                val depthIdx = (y * depthWidth + x) * 4  // 4 bytes per float
-                                if (depthIdx + 3 < depthData.capacity()) {
-                                    val depthFloat = depthData.getFloat(depthIdx)
-                                    val depthMm = depthFloat.toDouble()
+                    for (y in 0 until depthHeight step downsample) {
+                        for (x in 0 until depthWidth step downsample) {
+                            val depthIdx = (y * depthWidth + x) * 4  // 4 bytes per float
+                            if (depthIdx + 3 < depthData.capacity()) {
+                                val depthFloat = depthData.getFloat(depthIdx)
+                                val depthMm = depthFloat.toDouble()
 
-                                    // Show ALL valid points (just exclude NaN and zero)
-                                    if (depthMm > 0 && !depthMm.isNaN()) {
-                                        val point3D = unProject(x, y, depthMm)
-                                        points.add(point3D)
+                                // Show ALL valid points (just exclude NaN and zero)
+                                if (depthMm > 0 && !depthMm.isNaN()) {
+                                    validPoints++
+                                    val point3D = unProject(x, y, depthMm)
+                                    points.add(point3D)
 
-                                        // Map depth pixel to color pixel (simple scaling)
-                                        val colorX = (x * colorWidth / depthWidth).coerceIn(0, colorWidth - 1)
-                                        val colorY = (y * colorHeight / depthHeight).coerceIn(0, colorHeight - 1)
-                                        val colorIdx = (colorY * colorWidth + colorX) * 3  // RGB = 3 bytes per pixel
-
-                                        // Sample RGB color from color camera
-                                        val color = if (colorIdx + 2 < colorData.capacity()) {
-                                            val r = (colorData[colorIdx].toInt() and 0xFF) / 255.0
-                                            val g = (colorData[colorIdx + 1].toInt() and 0xFF) / 255.0
-                                            val b = (colorData[colorIdx + 2].toInt() and 0xFF) / 255.0
-                                            ColorRGBa(r, g, b)
-                                        } else {
-                                            ColorRGBa.WHITE  // Fallback
-                                        }
-                                        colors.add(color)
-
-                                        // Track min/max for stats
-                                        minDepth = minOf(minDepth, depthMm)
-                                        maxDepthForCloud = maxOf(maxDepthForCloud, depthMm)
+                                    // Get RGB color from registered buffer (BGRX format, 4 bytes per pixel)
+                                    val colorIdx = (y * depthWidth + x) * 4  // BGRX = 4 bytes per pixel
+                                    val color = if (colorIdx + 2 < registeredBuffer.capacity()) {
+                                        val b = (registeredBuffer[colorIdx].toInt() and 0xFF) / 255.0
+                                        val g = (registeredBuffer[colorIdx + 1].toInt() and 0xFF) / 255.0
+                                        val r = (registeredBuffer[colorIdx + 2].toInt() and 0xFF) / 255.0
+                                        ColorRGBa(r, g, b)
+                                    } else {
+                                        ColorRGBa.WHITE  // Fallback
                                     }
+                                    colors.add(color)
+
+                                    // Track min/max for stats
+                                    minDepth = minOf(minDepth, depthMm)
+                                    maxDepthForCloud = maxOf(maxDepthForCloud, depthMm)
                                 }
                             }
                         }
                     }
+                    if (frameCount % 30 == 0) {
+                        println("Generated ${points.size} points (validPoints=$validPoints), minDepth=${minDepth}mm, maxDepth=${maxDepthForCloud}mm")
+                    }
 
-                    // Step 3: Draw 3D scene
+                    // Draw 3D scene
                     drawer.isolated {
                         // The Orbital camera is automatically applied via extension
                         // No need to manually set view/projection matrices

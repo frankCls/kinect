@@ -1,5 +1,5 @@
 ---
-name: maven-runner
+name: local-maven-runner
 description: PROACTIVELY use this for running ANY Maven command.
 tools: Bash
 model: Sonnet

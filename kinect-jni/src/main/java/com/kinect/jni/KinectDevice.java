@@ -21,6 +21,28 @@ package com.kinect.jni;
 public class KinectDevice implements AutoCloseable {
 
     /**
+     * Container for synchronized frames with registration applied.
+     * Contains the depth frame, original color frame, and registered color frame
+     * (color aligned to depth coordinate space).
+     */
+    public static class RegisteredFrameSet {
+        /** Raw depth data (512x424 floats, millimeters) */
+        public final java.nio.ByteBuffer depth;
+
+        /** Original color data (1920x1080 BGRX) */
+        public final java.nio.ByteBuffer color;
+
+        /** Registered color data (512x424 BGRX, aligned to depth) */
+        public final java.nio.ByteBuffer registered;
+
+        RegisteredFrameSet(java.nio.ByteBuffer depth, java.nio.ByteBuffer color, java.nio.ByteBuffer registered) {
+            this.depth = depth;
+            this.color = color;
+            this.registered = registered;
+        }
+    }
+
+    /**
      * Native pointer to libfreenect2::Freenect2Device object.
      */
     private long nativeHandle;
@@ -98,6 +120,17 @@ public class KinectDevice implements AutoCloseable {
     public String getFirmwareVersion() {
         checkNotClosed();
         return nativeGetFirmwareVersion(nativeHandle);
+    }
+
+    /**
+     * Get the calibration parameters for depth and color cameras.
+     *
+     * @return calibration object containing camera intrinsics
+     * @throws IllegalStateException if device is closed
+     */
+    public Calibration getCalibration() {
+        checkNotClosed();
+        return nativeGetCalibration(nativeHandle);
     }
 
     /**
@@ -199,6 +232,44 @@ public class KinectDevice implements AutoCloseable {
     }
 
     /**
+     * Get synchronized frames with registration applied.
+     *
+     * This method waits for new frames from the device and applies registration
+     * to align the color data to the depth coordinate space. This is more efficient
+     * than manually calling Registration.applyRegistration() because it works with
+     * native frames directly without copying.
+     *
+     * @param registration Registration object to use for alignment
+     * @param timeoutMs timeout in milliseconds (0 for no timeout)
+     * @return RegisteredFrameSet containing depth, color, and registered frames, or null on timeout
+     * @throws IllegalStateException if device is closed or not streaming
+     * @throws IllegalArgumentException if registration is null or closed
+     */
+    public RegisteredFrameSet getRegisteredFrames(Registration registration, long timeoutMs) {
+        checkNotClosed();
+        if (!streaming) {
+            throw new IllegalStateException("Device is not streaming");
+        }
+        if (registration == null) {
+            throw new IllegalArgumentException("Registration cannot be null");
+        }
+        if (registration.isClosed()) {
+            throw new IllegalArgumentException("Registration has been closed");
+        }
+
+        Object[] buffers = nativeGetRegisteredFrames(nativeHandle, registration.getNativeHandle(), timeoutMs);
+        if (buffers == null) {
+            return null; // Timeout
+        }
+
+        return new RegisteredFrameSet(
+            (java.nio.ByteBuffer) buffers[0],  // depth
+            (java.nio.ByteBuffer) buffers[1],  // color
+            (java.nio.ByteBuffer) buffers[2]   // registered
+        );
+    }
+
+    /**
      * Check if this device has been closed.
      *
      * @return true if closed, false otherwise
@@ -285,6 +356,14 @@ public class KinectDevice implements AutoCloseable {
     private native String nativeGetFirmwareVersion(long handle);
 
     /**
+     * Get calibration parameters from device.
+     *
+     * @param handle native pointer to libfreenect2::Freenect2Device
+     * @return Calibration object containing camera parameters
+     */
+    private native Calibration nativeGetCalibration(long handle);
+
+    /**
      * Start streaming with all frame types.
      *
      * @param handle native pointer to libfreenect2::Freenect2Device
@@ -317,4 +396,71 @@ public class KinectDevice implements AutoCloseable {
      * @return Frame object, or null on timeout
      */
     private native Frame nativeGetNextFrame(long handle, int frameType, long timeoutMs);
+
+    /**
+     * Get synchronized depth and color frames with registration applied.
+     * Returns an array of [depthFrame, colorFrame]. The registered color data can be
+     * retrieved separately using getRegisteredBuffer().
+     *
+     * @param handle native pointer to DeviceContext
+     * @param timeoutMs timeout in milliseconds
+     * @return Frame array [depthFrame, colorFrame] or null on timeout
+     */
+    private native Frame[] nativeGetSynchronizedFrames(long handle, long timeoutMs);
+
+    /**
+     * Get the registered color buffer (populated by the last getSynchronizedFrames call).
+     * This copies the persistent registered buffer to the provided ByteBuffer.
+     *
+     * @param handle native pointer to DeviceContext
+     * @param byteBuffer direct ByteBuffer to copy data into (must be 512x424x4 bytes)
+     * @return true if successful, false otherwise
+     */
+    private native boolean nativeGetRegisteredBuffer(long handle, java.nio.ByteBuffer byteBuffer);
+
+    /**
+     * Get synchronized depth and color frames with registration applied.
+     *
+     * @param timeoutMs timeout in milliseconds
+     * @return Frame array [depthFrame, colorFrame] or null on timeout
+     * @throws IllegalStateException if device is closed or not streaming
+     */
+    public Frame[] getSynchronizedFrames(long timeoutMs) {
+        checkNotClosed();
+        if (!streaming) {
+            throw new IllegalStateException("Device is not streaming");
+        }
+        return nativeGetSynchronizedFrames(nativeHandle, timeoutMs);
+    }
+
+    /**
+     * Get the registered color buffer (512x424 BGRX format).
+     * This must be called after getSynchronizedFrames() to get the registered data.
+     *
+     * @param byteBuffer direct ByteBuffer to copy data into (must be at least 512x424x4 bytes)
+     * @return true if successful, false otherwise
+     * @throws IllegalStateException if device is closed
+     * @throws IllegalArgumentException if byteBuffer is null or not direct
+     */
+    public boolean getRegisteredBuffer(java.nio.ByteBuffer byteBuffer) {
+        checkNotClosed();
+        if (byteBuffer == null) {
+            throw new IllegalArgumentException("ByteBuffer cannot be null");
+        }
+        if (!byteBuffer.isDirect()) {
+            throw new IllegalArgumentException("ByteBuffer must be a direct buffer");
+        }
+        return nativeGetRegisteredBuffer(nativeHandle, byteBuffer);
+    }
+
+    /**
+     * Get synchronized frames with registration applied (native implementation).
+     * DEPRECATED: Use getSynchronizedFrames() + getRegisteredBuffer() instead.
+     *
+     * @param deviceHandle native pointer to DeviceContext
+     * @param registrationHandle native pointer to libfreenect2::Registration
+     * @param timeoutMs timeout in milliseconds
+     * @return Object array [depthBuffer, colorBuffer, registeredBuffer] or null on timeout
+     */
+    private native Object[] nativeGetRegisteredFrames(long deviceHandle, long registrationHandle, long timeoutMs);
 }

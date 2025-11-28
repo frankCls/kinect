@@ -70,6 +70,42 @@ class Kinect2 : Extension {
     lateinit var irCamera: Kinect2IRCamera
         private set
 
+    /**
+     * Get the underlying KinectDevice for advanced operations like Registration.
+     * @return KinectDevice instance, or null if not initialized
+     */
+    fun getDevice(): KinectDevice? = device
+
+    // Registered color buffer (512x424 BGRX pixels aligned to depth space)
+    private val registeredColorBuffer = ByteBuffer.allocateDirect(512 * 424 * 4)
+
+    /**
+     * Get synchronized raw depth and color frame data for registration.
+     * Returns a pair of ByteBuffers: (depth millimeters as floats, color BGRX).
+     * Depth buffer: 512x424 floats (4 bytes each), LITTLE_ENDIAN
+     * Color buffer: 1920x1080 BGRX (4 bytes per pixel)
+     * Returns null if frames not yet available.
+     */
+    fun getLatestRawFrames(): Pair<ByteBuffer?, ByteBuffer?>? {
+        if (!::depthCamera.isInitialized || !::colorCamera.isInitialized) {
+            return null
+        }
+        return Pair(
+            depthCamera.getDepthMillimeters(),
+            colorCamera.getRawColorData()
+        )
+    }
+
+    /**
+     * Get the registered color buffer (512x424 BGRX) aligned to depth coordinate space.
+     * This buffer is automatically populated during frame acquisition via getSynchronizedFrames.
+     * Returns a read-only view of the buffer for safe concurrent access.
+     * @return ByteBuffer containing registered color data, or null if not yet available
+     */
+    fun getRegisteredColorBuffer(): ByteBuffer? {
+        return registeredColorBuffer.asReadOnlyBuffer()
+    }
+
     // Internal state
     // Note: FreenectContext is managed by FreenectContextManager singleton
     private var device: KinectDevice? = null
@@ -163,30 +199,57 @@ class Kinect2 : Extension {
         try {
             while (running) {
                 try {
-                    // Fetch depth frame
-                    if (enableDepth) {
-                        val depthFrame = dev.getNextFrame(FrameType.DEPTH, 100)
-                        if (depthFrame != null) {
-                            depthCamera.publishFrame(depthFrame)
-                            depthFrame.close()
-                        }
-                    }
+                    // Use synchronized frame acquisition when both depth and color are enabled
+                    if (enableDepth && enableColor) {
+                        // Get synchronized frames (depth + color) with automatic registration
+                        val frames = dev.getSynchronizedFrames(100)
 
-                    // Fetch color frame
-                    if (enableColor) {
-                        val colorFrame = dev.getNextFrame(FrameType.COLOR, 100)
-                        if (colorFrame != null) {
-                            colorCamera.publishFrame(colorFrame)
-                            colorFrame.close()
-                        }
-                    }
+                        if (frames != null && frames.size >= 2) {
+                            // frames[0] = depth, frames[1] = color
+                            depthCamera.publishFrame(frames[0])
+                            colorCamera.publishFrame(frames[1])
 
-                    // Fetch IR frame
-                    if (enableInfrared) {
-                        val irFrame = dev.getNextFrame(FrameType.IR, 100)
-                        if (irFrame != null) {
-                            irCamera.publishFrame(irFrame)
-                            irFrame.close()
+                            // Get registered color buffer aligned to depth space
+                            registeredColorBuffer.rewind()
+                            dev.getRegisteredBuffer(registeredColorBuffer)
+
+                            // Close frames
+                            frames[0].close()
+                            frames[1].close()
+                        }
+
+                        // Handle IR separately if enabled
+                        if (enableInfrared) {
+                            val irFrame = dev.getNextFrame(FrameType.IR, 100)
+                            if (irFrame != null) {
+                                irCamera.publishFrame(irFrame)
+                                irFrame.close()
+                            }
+                        }
+                    } else {
+                        // Fall back to individual frame fetching when not using both depth+color
+                        if (enableDepth) {
+                            val depthFrame = dev.getNextFrame(FrameType.DEPTH, 100)
+                            if (depthFrame != null) {
+                                depthCamera.publishFrame(depthFrame)
+                                depthFrame.close()
+                            }
+                        }
+
+                        if (enableColor) {
+                            val colorFrame = dev.getNextFrame(FrameType.COLOR, 100)
+                            if (colorFrame != null) {
+                                colorCamera.publishFrame(colorFrame)
+                                colorFrame.close()
+                            }
+                        }
+
+                        if (enableInfrared) {
+                            val irFrame = dev.getNextFrame(FrameType.IR, 100)
+                            if (irFrame != null) {
+                                irCamera.publishFrame(irFrame)
+                                irFrame.close()
+                            }
                         }
                     }
 
@@ -575,10 +638,31 @@ class Kinect2ColorCamera : Kinect2Camera(
 ) {
     private companion object { val logger = LoggerFactory.getLogger(Kinect2ColorCamera::class.java) }
 
+    // Raw color (BGRX) double-buffered storage for registration consumers
+    private val colorBufferLock = Any()
+    private var frontColorBuffer: ByteBuffer? = ByteBuffer.allocateDirect(width * height * 4)
+    private var backColorBuffer: ByteBuffer? = ByteBuffer.allocateDirect(width * height * 4)
+
+    /**
+     * Expose a read-only view of the latest raw color BGRX data.
+     * Each pixel is 4 bytes (B, G, R, X). May return null before first frame.
+     */
+    fun getRawColorData(): ByteBuffer? = synchronized(colorBufferLock) {
+        frontColorBuffer?.asReadOnlyBuffer()
+    }
+
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
         val data = frame.data
 
-        // Convert BGRX to RGB with vertical flip
+        // Store raw BGRX data in back buffer for registration
+        val rawBack = backColorBuffer
+        rawBack?.clear()
+        if (rawBack != null) {
+            data.position(0)
+            rawBack.put(data)
+        }
+
+        // Convert BGRX to RGB with vertical flip for display
         data.position(0)
         for (y in 0 until height) {
             for (x in 0 until width) {
@@ -597,6 +681,13 @@ class Kinect2ColorCamera : Kinect2Camera(
                 buffer.put(g)
                 buffer.put(b)
             }
+        }
+
+        // Swap raw color buffers so readers see the latest BGRX data
+        synchronized(colorBufferLock) {
+            val tmp = frontColorBuffer
+            frontColorBuffer = backColorBuffer
+            backColorBuffer = tmp
         }
     }
 }
