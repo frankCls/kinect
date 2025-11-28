@@ -26,6 +26,8 @@
 #include <thread>
 #include <chrono>
 
+#include "logging.h"
+
 // macOS-specific includes for Grand Central Dispatch
 #ifdef __APPLE__
 #include <dispatch/dispatch.h>
@@ -75,17 +77,14 @@ void initializeGLFWOnMainThread() {
         return; // Already initialized
     }
 
-    fprintf(stderr, "[JNI] Initializing GLFW on main thread...\n");
-    fflush(stderr);
+    LOG_INFO("Initializing GLFW on main thread...");
 
     int result = glfwInit();
     if (result == 0) {
-        fprintf(stderr, "[JNI] ERROR: glfwInit() failed\n");
-        fflush(stderr);
+        LOG_ERROR("glfwInit() failed");
     } else {
         g_glfwInitialized = true;
-        fprintf(stderr, "[JNI] GLFW initialized successfully\n");
-        fflush(stderr);
+        LOG_INFO("GLFW initialized successfully");
     }
 }
 
@@ -108,13 +107,11 @@ void ensureGLFWInitialized() {
     g_glfwInitInProgress = true;
     lock.unlock();
 
-    fprintf(stderr, "[JNI] GLFW not initialized, dispatching to main thread...\n");
-    fflush(stderr);
+    LOG_INFO("GLFW not initialized, dispatching to main thread...");
 
     // If we're already on the main thread, just call directly to avoid deadlock
     if (isMainThread()) {
-        fprintf(stderr, "[JNI] Already on main thread, initializing GLFW directly...\n");
-        fflush(stderr);
+        LOG_INFO("Already on main thread, initializing GLFW directly...");
         initializeGLFWOnMainThread();
     } else {
         // Dispatch to main thread
@@ -140,27 +137,22 @@ libfreenect2::PacketPipeline* createOpenGLPipelineOnMainThread() {
 
     auto createPipeline = ^{
         try {
-            fprintf(stderr, "[JNI] Creating OpenGL pipeline on main thread...\n");
-            fflush(stderr);
+            LOG_INFO("Creating OpenGL pipeline on main thread...");
             pipeline = new libfreenect2::OpenGLPacketPipeline();
-            fprintf(stderr, "[JNI] OpenGL pipeline created successfully\n");
-            fflush(stderr);
+            LOG_INFO("OpenGL pipeline created successfully");
             pipelineCreated = true;
         } catch (const std::exception &e) {
             errorMessage = e.what();
-            fprintf(stderr, "[JNI] ERROR creating pipeline: %s\n", e.what());
-            fflush(stderr);
+            LOG_ERROR("Creating pipeline: %s", e.what());
         } catch (...) {
             errorMessage = "Unknown exception creating OpenGL pipeline";
-            fprintf(stderr, "[JNI] ERROR: Unknown exception creating pipeline\n");
-            fflush(stderr);
+            LOG_ERROR("Unknown exception creating pipeline");
         }
     };
 
     // If we're already on the main thread, just call directly to avoid deadlock
     if (isMainThread()) {
-        fprintf(stderr, "[JNI] Already on main thread, creating pipeline directly...\n");
-        fflush(stderr);
+        LOG_INFO("Already on main thread, creating pipeline directly...");
         createPipeline();
     } else {
         dispatch_sync(dispatch_get_main_queue(), createPipeline);
@@ -243,8 +235,7 @@ jobject createJavaFrame(JNIEnv *env, libfreenect2::Frame *frame, int frameTypeVa
     // Find Frame class and constructor
     jclass frameClass = env->FindClass("com/kinect/jni/Frame");
     if (frameClass == nullptr) {
-        fprintf(stderr, "[JNI] ERROR: Failed to find Frame class\n");
-        fflush(stderr);
+        LOG_ERROR("Failed to find Frame class");
         env->ExceptionDescribe();
         return nullptr;
     }
@@ -252,8 +243,7 @@ jobject createJavaFrame(JNIEnv *env, libfreenect2::Frame *frame, int frameTypeVa
     // Find FrameType enum
     jclass frameTypeClass = env->FindClass("com/kinect/jni/FrameType");
     if (frameTypeClass == nullptr) {
-        fprintf(stderr, "[JNI] ERROR: Failed to find FrameType class\n");
-        fflush(stderr);
+        LOG_ERROR("Failed to find FrameType class");
         env->ExceptionDescribe();
         return nullptr;
     }
@@ -262,8 +252,7 @@ jobject createJavaFrame(JNIEnv *env, libfreenect2::Frame *frame, int frameTypeVa
     jmethodID fromNativeValueMethod = env->GetStaticMethodID(
         frameTypeClass, "fromNativeValue", "(I)Lcom/kinect/jni/FrameType;");
     if (fromNativeValueMethod == nullptr) {
-        fprintf(stderr, "[JNI] ERROR: Failed to find fromNativeValue method\n");
-        fflush(stderr);
+        LOG_ERROR("Failed to find fromNativeValue method");
         env->ExceptionDescribe();
         return nullptr;
     }
@@ -272,14 +261,12 @@ jobject createJavaFrame(JNIEnv *env, libfreenect2::Frame *frame, int frameTypeVa
     jobject frameType = env->CallStaticObjectMethod(
         frameTypeClass, fromNativeValueMethod, frameTypeValue);
     if (env->ExceptionCheck()) {
-        fprintf(stderr, "[JNI] ERROR: Exception calling fromNativeValue\n");
-        fflush(stderr);
+        LOG_ERROR("Exception calling fromNativeValue");
         env->ExceptionDescribe();
         return nullptr;
     }
     if (frameType == nullptr) {
-        fprintf(stderr, "[JNI] ERROR: fromNativeValue returned null\n");
-        fflush(stderr);
+        LOG_ERROR("fromNativeValue returned null");
         return nullptr;
     }
 
@@ -290,16 +277,14 @@ jobject createJavaFrame(JNIEnv *env, libfreenect2::Frame *frame, int frameTypeVa
         frameClass, "<init>",
         "(JLcom/kinect/jni/FrameType;IIIJJ)V");
     if (frameConstructor == nullptr) {
-        fprintf(stderr, "[JNI] ERROR: Failed to find Frame constructor with signature (JLcom/kinect/jni/FrameType;IIIJJ)V\n");
-        fflush(stderr);
+        LOG_ERROR("Failed to find Frame constructor with signature (JLcom/kinect/jni/FrameType;IIIJJ)V");
         env->ExceptionDescribe();
         return nullptr;
     }
 
     // Create Frame object
-    fprintf(stderr, "[JNI] Creating Frame: width=%d, height=%d, bpp=%d, ts=%ld, seq=%ld\n",
+    LOG_DEBUG("Creating Frame: width=%d, height=%d, bpp=%d, ts=%ld, seq=%ld",
             frame->width, frame->height, frame->bytes_per_pixel, frame->timestamp, frame->sequence);
-    fflush(stderr);
 
     jobject javaFrame = env->NewObject(
         frameClass, frameConstructor,
@@ -313,20 +298,17 @@ jobject createJavaFrame(JNIEnv *env, libfreenect2::Frame *frame, int frameTypeVa
     );
 
     if (env->ExceptionCheck()) {
-        fprintf(stderr, "[JNI] ERROR: Exception creating Frame object\n");
-        fflush(stderr);
+        LOG_ERROR("Exception creating Frame object");
         env->ExceptionDescribe();
         return nullptr;
     }
 
     if (javaFrame == nullptr) {
-        fprintf(stderr, "[JNI] ERROR: NewObject returned null\n");
-        fflush(stderr);
+        LOG_ERROR("NewObject returned null");
         return nullptr;
     }
 
-    fprintf(stderr, "[JNI] Frame object created successfully\n");
-    fflush(stderr);
+    LOG_DEBUG("Frame object created successfully");
     return javaFrame;
 }
 
@@ -375,17 +357,14 @@ JNI_METHOD(void, FreenectContext, nativeDestroyContext)(JNIEnv *env, jobject obj
         // The OpenGLPacketPipeline destructor calls glfwDestroyWindow which requires main thread
 
         auto destroyContext = ^{
-            fprintf(stderr, "[JNI] Destroying Freenect2 context on main thread...\n");
-            fflush(stderr);
+            LOG_INFO("Destroying Freenect2 context on main thread...");
             delete freenect2;
-            fprintf(stderr, "[JNI] Freenect2 context destroyed\n");
-            fflush(stderr);
+            LOG_INFO("Freenect2 context destroyed");
         };
 
         // If we're already on the main thread, just call directly to avoid deadlock
         if (isMainThread()) {
-            fprintf(stderr, "[JNI] Already on main thread, destroying context directly...\n");
-            fflush(stderr);
+            LOG_INFO("Already on main thread, destroying context directly...");
             destroyContext();
         } else {
             dispatch_sync(dispatch_get_main_queue(), destroyContext);
@@ -477,11 +456,9 @@ JNI_METHOD(jstring, FreenectContext, nativeGetDefaultDeviceSerial)(JNIEnv *env, 
  */
 libfreenect2::PacketPipeline* createPipeline(int pipelineType) {
     if (pipelineType == 0) {  // CPU
-        fprintf(stderr, "[JNI] Creating CPU pipeline...\n");
-        fflush(stderr);
+        LOG_INFO("Creating CPU pipeline...");
         libfreenect2::PacketPipeline *pipeline = new libfreenect2::CpuPacketPipeline();
-        fprintf(stderr, "[JNI] CPU pipeline created successfully\n");
-        fflush(stderr);
+        LOG_INFO("CPU pipeline created successfully");
         return pipeline;
     } else {  // OPENGL (default)
 #ifdef __APPLE__
@@ -489,11 +466,9 @@ libfreenect2::PacketPipeline* createPipeline(int pipelineType) {
         return createOpenGLPipelineOnMainThread();
 #else
         // On other platforms, create pipeline normally
-        fprintf(stderr, "[JNI] Creating OpenGL pipeline...\n");
-        fflush(stderr);
+        LOG_INFO("Creating OpenGL pipeline...");
         libfreenect2::PacketPipeline *pipeline = new libfreenect2::OpenGLPacketPipeline();
-        fprintf(stderr, "[JNI] OpenGL pipeline created\n");
-        fflush(stderr);
+        LOG_INFO("OpenGL pipeline created");
         return pipeline;
 #endif
     }
@@ -527,14 +502,12 @@ JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlon
         }
 
         // Log debug info
-        fprintf(stderr, "[JNI] nativeOpenDevice: Device serial = %s, pipeline type = %d\n",
+        LOG_DEBUG("nativeOpenDevice: Device serial = %s, pipeline type = %d",
                 serialStr.c_str(), pipelineType);
-        fflush(stderr);
 
         // Check if serial is empty (no device available)
         if (serialStr.empty()) {
-            fprintf(stderr, "[JNI] ERROR: No device found (empty serial)\n");
-            fflush(stderr);
+            LOG_ERROR("No device found (empty serial)");
             throwRuntimeException(env, "No Kinect device found");
             return 0;
         }
@@ -543,31 +516,26 @@ JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlon
         libfreenect2::PacketPipeline *pipeline = createPipeline(pipelineType);
 
         // Open device with selected pipeline
-        fprintf(stderr, "[JNI] Opening device...\n");
-        fflush(stderr);
+        LOG_INFO("Opening device...");
         libfreenect2::Freenect2Device *device = freenect2->openDevice(serialStr, pipeline);
 
-        fprintf(stderr, "[JNI] openDevice() returned (device=%p)\n", device);
-        fflush(stderr);
+        LOG_DEBUG("openDevice() returned (device=%p)", device);
 
         if (device == nullptr) {
-            fprintf(stderr, "[JNI] ERROR: Failed to open device (returned nullptr)\n");
-            fflush(stderr);
+            LOG_ERROR("Failed to open device (returned nullptr)");
             delete pipeline;
             throwRuntimeException(env, "Failed to open device (device not found or in use)");
             return 0;
         }
 
-        fprintf(stderr, "[JNI] Device opened successfully\n");
-        fflush(stderr);
+        LOG_INFO("Device opened successfully");
 
         // Create device context
         // NOTE: Registration is NOT initialized here - it will be lazy-initialized
         // after device starts and calibration data is loaded from firmware
         DeviceContext *ctx = new DeviceContext(device);
 
-        fprintf(stderr, "[JNI] DeviceContext created (Registration will be lazy-initialized after device start)\n");
-        fflush(stderr);
+        LOG_INFO("DeviceContext created (Registration will be lazy-initialized after device start)");
 
         jlong handle = reinterpret_cast<jlong>(ctx);
 
@@ -577,18 +545,15 @@ JNI_METHOD(jlong, KinectDevice, nativeOpenDevice)(JNIEnv *env, jobject obj, jlon
             deviceRegistry[handle] = ctx;
         }
 
-        fprintf(stderr, "[JNI] Device initialized and registered (handle=%lx)\n", handle);
-        fflush(stderr);
+        LOG_DEBUG("Device initialized and registered (handle=%lx)", handle);
 
         return handle;
     } catch (const std::exception &e) {
-        fprintf(stderr, "[JNI] EXCEPTION: %s\n", e.what());
-        fflush(stderr);
+        LOG_ERROR("EXCEPTION: %s", e.what());
         throwRuntimeException(env, (std::string("Device open exception: ") + e.what()).c_str());
         return 0;
     } catch (...) {
-        fprintf(stderr, "[JNI] UNKNOWN EXCEPTION in nativeOpenDevice\n");
-        fflush(stderr);
+        LOG_ERROR("UNKNOWN EXCEPTION in nativeOpenDevice");
         throwRuntimeException(env, "Unknown exception opening device");
         return 0;
     }
@@ -701,12 +666,11 @@ JNI_METHOD(jboolean, KinectDevice, nativeStartWithTypes)(JNIEnv *env, jobject ob
             return JNI_FALSE;
         }
 
-        fprintf(stderr, "[JNI] nativeStartWithTypes called with typeMask=%d (Color=%d, IR=%d, Depth=%d)\n",
+        LOG_INFO("nativeStartWithTypes called with typeMask=%d (Color=%d, IR=%d, Depth=%d)",
                 typeMask,
                 (typeMask & libfreenect2::Frame::Color) ? 1 : 0,
                 (typeMask & libfreenect2::Frame::Ir) ? 1 : 0,
                 (typeMask & libfreenect2::Frame::Depth) ? 1 : 0);
-        fflush(stderr);
 
         // Create frame listener with specified types
         ctx->listener = new libfreenect2::SyncMultiFrameListener(static_cast<int>(typeMask));
@@ -843,21 +807,20 @@ JNI_METHOD(jobjectArray, KinectDevice, nativeGetSynchronizedFrames)(JNIEnv *env,
 
         // Lazy initialization of Registration (must be done AFTER device starts and calibration loads)
         if (!ctx->registrationInitialized) {
-            fprintf(stderr, "[JNI] Lazy-initializing Registration (device has started, calibration should be loaded)...\n");
-            fflush(stderr);
+            LOG_INFO("Lazy-initializing Registration (device has started, calibration should be loaded)...");
 
             // Get camera parameters (should be valid now that device has started)
             libfreenect2::Freenect2Device::IrCameraParams irParams = ctx->device->getIrCameraParams();
             libfreenect2::Freenect2Device::ColorCameraParams colorParams = ctx->device->getColorCameraParams();
 
-            fprintf(stderr, "[JNI] IR camera params: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n",
+            LOG_TRACE("IR camera params: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f",
                     irParams.fx, irParams.fy, irParams.cx, irParams.cy);
-            fprintf(stderr, "[JNI] Color camera params: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f\n",
+            LOG_TRACE("Color camera params: fx=%.2f, fy=%.2f, cx=%.2f, cy=%.2f",
                     colorParams.fx, colorParams.fy, colorParams.cx, colorParams.cy);
-            fflush(stderr);
 
             // Verify calibration data is valid
             if (irParams.fx == 0.0 || irParams.fy == 0.0 || colorParams.fx == 0.0 || colorParams.fy == 0.0) {
+                LOG_ERROR("Camera calibration data is invalid (all zeros) - device may not have started properly");
                 throwRuntimeException(env, "Camera calibration data is invalid (all zeros) - device may not have started properly");
                 return nullptr;
             }
@@ -878,8 +841,7 @@ JNI_METHOD(jobjectArray, KinectDevice, nativeGetSynchronizedFrames)(JNIEnv *env,
 
             ctx->registrationInitialized = true;
 
-            fprintf(stderr, "[JNI] Registration initialized successfully with valid calibration data\n");
-            fflush(stderr);
+            LOG_INFO("Registration initialized successfully with valid calibration data");
         }
 
         // Wait for synchronized frames from listener
@@ -904,9 +866,8 @@ JNI_METHOD(jobjectArray, KinectDevice, nativeGetSynchronizedFrames)(JNIEnv *env,
             colorFrame = frames[libfreenect2::Frame::Color];
             depthFrame = frames[libfreenect2::Frame::Depth];
 
-            fprintf(stderr, "[JNI] nativeGetSynchronizedFrames attempt %d: Color=%p, Depth=%p\n",
+            LOG_DEBUG("nativeGetSynchronizedFrames attempt %d: Color=%p, Depth=%p",
                     attempts + 1, colorFrame, depthFrame);
-            fflush(stderr);
 
             if (colorFrame != nullptr && depthFrame != nullptr) {
                 // Got both frames!
@@ -925,69 +886,61 @@ JNI_METHOD(jobjectArray, KinectDevice, nativeGetSynchronizedFrames)(JNIEnv *env,
             if (!frames.empty()) {
                 ctx->listener->release(frames);
             }
-            fprintf(stderr, "[JNI] ERROR: Failed to get both frames after %d attempts (Color=%p, Depth=%p)\n",
+            LOG_ERROR("Failed to get both frames after %d attempts (Color=%p, Depth=%p)",
                     attempts, colorFrame, depthFrame);
-            fflush(stderr);
             // Return null on timeout (not an exception)
             return nullptr;
         }
 
-        fprintf(stderr, "[JNI] Successfully got both frames: Color=%p, Depth=%p\n", colorFrame, depthFrame);
-        fflush(stderr);
+        LOG_DEBUG("Successfully got both frames: Color=%p, Depth=%p", colorFrame, depthFrame);
 
         // Debug: Check frame dimensions and formats
-        fprintf(stderr, "[JNI] Color frame: %dx%d, bpp=%d, format=%d\n",
+        LOG_TRACE("Color frame: %dx%d, bpp=%d, format=%d",
                 colorFrame->width, colorFrame->height, colorFrame->bytes_per_pixel, colorFrame->format);
-        fprintf(stderr, "[JNI] Depth frame: %dx%d, bpp=%d, format=%d\n",
+        LOG_TRACE("Depth frame: %dx%d, bpp=%d, format=%d",
                 depthFrame->width, depthFrame->height, depthFrame->bytes_per_pixel, depthFrame->format);
-        fflush(stderr);
 
         // Debug: Check input color frame center pixel (BGRX format: 1920x1080x4)
         int colorCenterIdx = (1080 / 2) * 1920 + (1920 / 2);
         unsigned char *colorCenterPixel = &((unsigned char*)colorFrame->data)[colorCenterIdx * 4];
-        fprintf(stderr, "[JNI] Input color center RGB: (%d, %d, %d)\n",
+        LOG_TRACE("Input color center RGB: (%d, %d, %d)",
                 colorCenterPixel[2], colorCenterPixel[1], colorCenterPixel[0]); // BGRX: [B, G, R, X]
-        fflush(stderr);
 
         // Debug: Check input depth frame center pixel (float mm)
         int depthCenterIdx = (424 / 2) * 512 + (512 / 2);
         float depthCenterValue = ((float*)depthFrame->data)[depthCenterIdx];
-        fprintf(stderr, "[JNI] Input depth center: %.2f mm\n", depthCenterValue);
-        fflush(stderr);
+        LOG_TRACE("Input depth center: %.2f mm", depthCenterValue);
 
         // Apply registration using native frames while they're still valid
         // This populates ctx->undistorted and ctx->registered (persistent buffers)
         // Try with enable_filter=true to see if that helps
         ctx->registration->apply(colorFrame, depthFrame, ctx->undistorted, ctx->registered, true);
 
-        fprintf(stderr, "[JNI] Registration applied successfully (enable_filter=true)\n");
-        fprintf(stderr, "[JNI] Registered buffer after apply: %dx%d, bpp=%d, format=%d\n",
+        LOG_DEBUG("Registration applied successfully (enable_filter=true)");
+        LOG_TRACE("Registered buffer after apply: %dx%d, bpp=%d, format=%d",
                 ctx->registered->width, ctx->registered->height, ctx->registered->bytes_per_pixel, ctx->registered->format);
-        fflush(stderr);
 
         // Copy registered data to persistent buffer (persists after we release frames)
         // ctx->registered->data is BGRX format (512x424x4 bytes)
         memcpy(ctx->registeredBuffer, ctx->registered->data, 512 * 424 * 4);
 
         // Debug: Check MULTIPLE pixels in registered buffer to see if ANY have valid RGB
-        fprintf(stderr, "[JNI] Checking registered buffer pixels:\n");
+        LOG_TRACE("Checking registered buffer pixels:");
         for (int i = 0; i < 5; i++) {
             int testY = 100 + i * 50;  // Sample at different Y positions
             int testX = 256;            // Center X
             int idx = (testY * 512 + testX) * 4;
             unsigned char *pixel = &((unsigned char*)ctx->registered->data)[idx];
-            fprintf(stderr, "[JNI]   Pixel[%d,%d] RGB: (%d, %d, %d)\n",
+            LOG_TRACE("  Pixel[%d,%d] RGB: (%d, %d, %d)",
                     testX, testY, pixel[2], pixel[1], pixel[0]);
         }
         // Also check center
         int centerIdx = (424 / 2) * 512 + (512 / 2);
         unsigned char *centerPixel = &((unsigned char*)ctx->registered->data)[centerIdx * 4];
-        fprintf(stderr, "[JNI]   Center[%d,%d] RGB: (%d, %d, %d)\n",
+        LOG_TRACE("  Center[%d,%d] RGB: (%d, %d, %d)",
                 256, 212, centerPixel[2], centerPixel[1], centerPixel[0]);
-        fflush(stderr);
 
-        fprintf(stderr, "[JNI] Registered data copied to persistent buffer\n");
-        fflush(stderr);
+        LOG_DEBUG("Registered data copied to persistent buffer");
 
         // Create copies of depth and color frames for Java (we need to own them after releasing the frame map)
         libfreenect2::Frame *depthCopy = new libfreenect2::Frame(
@@ -1013,8 +966,7 @@ JNI_METHOD(jobjectArray, KinectDevice, nativeGetSynchronizedFrames)(JNIEnv *env,
         // Release native frames back to listener (they will be recycled)
         ctx->listener->release(frames);
 
-        fprintf(stderr, "[JNI] Native frames released\n");
-        fflush(stderr);
+        LOG_DEBUG("Releasing frames");
 
         // Create Java Frame objects
         jobject depthJavaFrame = createJavaFrame(env, depthCopy, libfreenect2::Frame::Depth);
@@ -1032,8 +984,7 @@ JNI_METHOD(jobjectArray, KinectDevice, nativeGetSynchronizedFrames)(JNIEnv *env,
             return nullptr;
         }
 
-        fprintf(stderr, "[JNI] Java Frame objects created successfully\n");
-        fflush(stderr);
+        LOG_DEBUG("Java Frame objects created successfully");
 
         // Create result array [depthFrame, colorFrame]
         jclass frameClass = env->FindClass("com/kinect/jni/Frame");
@@ -1045,8 +996,7 @@ JNI_METHOD(jobjectArray, KinectDevice, nativeGetSynchronizedFrames)(JNIEnv *env,
         return result;
 
     } catch (const std::exception &e) {
-        fprintf(stderr, "[JNI] EXCEPTION in nativeGetSynchronizedFrames: %s\n", e.what());
-        fflush(stderr);
+        LOG_ERROR("EXCEPTION in nativeGetSynchronizedFrames: %s", e.what());
         throwRuntimeException(env, e.what());
         return nullptr;
     }
@@ -1106,14 +1056,12 @@ JNI_METHOD(jboolean, KinectDevice, nativeGetRegisteredBuffer)(JNIEnv *env, jobje
         // Copy registered buffer data to Java ByteBuffer
         memcpy(bufferAddr, ctx->registeredBuffer, expectedSize);
 
-        fprintf(stderr, "[JNI] Copied %lld bytes to registered buffer\n", expectedSize);
-        fflush(stderr);
+        LOG_DEBUG("Copied %lld bytes to registered buffer", expectedSize);
 
         return JNI_TRUE;
 
     } catch (const std::exception &e) {
-        fprintf(stderr, "[JNI] EXCEPTION in nativeGetRegisteredBuffer: %s\n", e.what());
-        fflush(stderr);
+        LOG_ERROR("EXCEPTION in nativeGetRegisteredBuffer: %s", e.what());
         throwRuntimeException(env, e.what());
         return JNI_FALSE;
     }
@@ -1290,8 +1238,7 @@ JNI_METHOD(jlong, Registration, nativeCreateRegistration)(JNIEnv *env, jclass cl
         // Create Registration object
         libfreenect2::Registration *registration = new libfreenect2::Registration(irParams, colorParams);
 
-        fprintf(stderr, "[JNI] Created Registration object (handle=%p)\n", registration);
-        fflush(stderr);
+        LOG_DEBUG("Created Registration object (handle=%p)", registration);
 
         return reinterpret_cast<jlong>(registration);
 
@@ -1356,13 +1303,12 @@ JNI_METHOD(void, Registration, nativeApplyRegistration)(JNIEnv *env, jobject obj
             uint8_t b = color[centerColorIdx];
             uint8_t g = color[centerColorIdx + 1];
             uint8_t r = color[centerColorIdx + 2];
-            fprintf(stderr, "[JNI] Input color center RGB: (%d, %d, %d)\n", r, g, b);
+            LOG_TRACE("Input color center RGB: (%d, %d, %d)", r, g, b);
 
             // Check depth center value
             int centerDepthIdx = (depthHeight / 2 * depthWidth + depthWidth / 2);
             float centerDepth = depth[centerDepthIdx];
-            fprintf(stderr, "[JNI] Input depth center: %.2f mm\n", centerDepth);
-            fflush(stderr);
+            LOG_TRACE("Input depth center: %.2f mm", centerDepth);
         }
 
         // Apply registration using frame-based API
@@ -1371,12 +1317,11 @@ JNI_METHOD(void, Registration, nativeApplyRegistration)(JNIEnv *env, jobject obj
 
         // Debug: Check registered frame after apply()
         if (debugInput % 100 == 0) {
-            fprintf(stderr, "[JNI] After apply(): registered.data=%p, size=%zu x %zu\n",
+            LOG_TRACE("After apply(): registered.data=%p, size=%zu x %zu",
                     registered.data, registered.width, registered.height);
             uint32_t *regData = (uint32_t*)registered.data;
             uint32_t centerPixel = regData[depthHeight / 2 * depthWidth + depthWidth / 2];
-            fprintf(stderr, "[JNI] Registered center pixel BGRX: 0x%08X\n", centerPixel);
-            fflush(stderr);
+            LOG_TRACE("Registered center pixel BGRX: 0x%08X", centerPixel);
         }
 
         // Copy registered BGRX frame directly to output buffer (no conversion needed)
@@ -1390,8 +1335,7 @@ JNI_METHOD(void, Registration, nativeApplyRegistration)(JNIEnv *env, jobject obj
             uint8_t b = output[centerIdx];
             uint8_t g = output[centerIdx + 1];
             uint8_t r = output[centerIdx + 2];
-            fprintf(stderr, "[JNI Registration] Center pixel RGB: (%d, %d, %d)\n", r, g, b);
-            fflush(stderr);
+            LOG_TRACE("Registration center pixel RGB: (%d, %d, %d)", r, g, b);
         }
 
     } catch (const std::exception &e) {
@@ -1453,8 +1397,7 @@ JNI_METHOD(jobjectArray, KinectDevice, nativeGetRegisteredFrames)(
             colorFrame = frames[libfreenect2::Frame::Color];
             depthFrame = frames[libfreenect2::Frame::Depth];
 
-            fprintf(stderr, "[JNI] Attempt %d: Color=%p, Depth=%p\n", attempts + 1, colorFrame, depthFrame);
-            fflush(stderr);
+            LOG_DEBUG("Attempt %d: Color=%p, Depth=%p", attempts + 1, colorFrame, depthFrame);
 
             if (colorFrame != nullptr && depthFrame != nullptr) {
                 // Got both frames!
@@ -1473,15 +1416,13 @@ JNI_METHOD(jobjectArray, KinectDevice, nativeGetRegisteredFrames)(
             if (!frames.empty()) {
                 ctx->listener->release(frames);
             }
-            fprintf(stderr, "[JNI] ERROR: Failed to get both frames after %d attempts (Color=%p, Depth=%p)\n",
+            LOG_ERROR("Failed to get both frames after %d attempts (Color=%p, Depth=%p)",
                     attempts, colorFrame, depthFrame);
-            fflush(stderr);
             throwRuntimeException(env, "Required frames not available");
             return nullptr;
         }
 
-        fprintf(stderr, "[JNI] Successfully got both frames: Color=%p, Depth=%p\n", colorFrame, depthFrame);
-        fflush(stderr);
+        LOG_DEBUG("Successfully got both frames: Color=%p, Depth=%p", colorFrame, depthFrame);
 
         // Allocate persistent frame buffers on first call (reused for subsequent calls)
         if (ctx->undistorted == nullptr) {
@@ -1542,8 +1483,7 @@ JNI_METHOD(jobjectArray, KinectDevice, nativeGetRegisteredFrames)(
 JNI_METHOD(void, Registration, nativeDestroyRegistration)(JNIEnv *env, jobject obj, jlong handle) {
     if (handle != 0) {
         libfreenect2::Registration *registration = reinterpret_cast<libfreenect2::Registration*>(handle);
-        fprintf(stderr, "[JNI] Destroying Registration object (handle=%p)\n", registration);
-        fflush(stderr);
+        LOG_DEBUG("Destroying Registration object (handle=%p)", registration);
         delete registration;
     }
 }

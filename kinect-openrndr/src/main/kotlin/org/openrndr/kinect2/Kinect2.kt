@@ -597,7 +597,7 @@ class Kinect2DepthCamera : Kinect2Camera(
 
                 // Debug center pixel
                 if (shouldLog && x == width/2 && y == height/2) {
-                    logger.info("DEPTH Center pixel: depthMm=$depthMm, gray=$gray (${gray*100/255}%)")
+                    logger.debug("DEPTH Center pixel: depthMm=$depthMm, gray=$gray (${gray*100/255}%)")
                 }
 
                 buffer.position(dstIdx * 4)
@@ -613,7 +613,7 @@ class Kinect2DepthCamera : Kinect2Camera(
             val closestGray = depthGammaTable[minDepth.coerceIn(0, 65535)]
             val totalPixels = width * height
             val validPercent = (validPixels * 100.0) / totalPixels
-            logger.info("DEPTH Closest pixel at ($minX, $minY): depthMm=${minDepth}mm, gray=$closestGray (${closestGray*100/255}%) | Valid pixels: $validPixels/$totalPixels (${String.format("%.1f", validPercent)}%)")
+            logger.debug("DEPTH Closest pixel at ($minX, $minY): depthMm=${minDepth}mm, gray=$closestGray (${closestGray*100/255}%) | Valid pixels: $validPixels/$totalPixels (${String.format("%.1f", validPercent)}%)")
         }
 
         // Swap raw depth buffers so readers see the latest mm values
