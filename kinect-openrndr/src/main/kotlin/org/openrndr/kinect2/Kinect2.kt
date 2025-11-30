@@ -6,12 +6,10 @@ import com.kinect.jni.KinectDevice
 import com.kinect.jni.Frame
 import com.kinect.jni.FrameType
 import com.kinect.jni.PipelineType
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.*
+import kotlin.coroutines.coroutineContext
 import org.openrndr.Extension
 import org.openrndr.Program
 import org.openrndr.color.ColorRGBa
@@ -21,7 +19,8 @@ import org.openrndr.draw.ColorType
 import org.openrndr.draw.colorBuffer
 import org.slf4j.LoggerFactory
 import java.nio.ByteBuffer
-import kotlin.concurrent.thread
+import java.nio.ByteOrder
+import kotlin.math.pow
 
 /**
  * OPENRNDR Extension for Kinect V2 integration.
@@ -50,7 +49,7 @@ import kotlin.concurrent.thread
 class Kinect2 : Extension {
     override var enabled: Boolean = true
 
-    private val logger = LoggerFactory.getLogger(Kinect2::class.java)
+    private companion object { val logger = LoggerFactory.getLogger(Kinect2::class.java) }
 
     // Configuration properties (set before setup)
     var deviceIndex: Int = 0
@@ -68,15 +67,25 @@ class Kinect2 : Extension {
     lateinit var irCamera: Kinect2IRCamera
         private set
 
+    // Registered color buffer (512x424 BGRX pixels aligned to depth space)
+    private val registeredColorBuffer = ByteBuffer.allocateDirect(512 * 424 * 4)
+
+    /**
+     * Get the registered color buffer (512x424 BGRX) aligned to depth coordinate space.
+     * This buffer is automatically populated during frame acquisition via getSynchronizedFrames.
+     * Returns a read-only view of the buffer for safe concurrent access.
+     * @return ByteBuffer containing registered color data, or null if not yet available
+     */
+    fun getRegisteredColorBuffer(): ByteBuffer? {
+        return registeredColorBuffer.asReadOnlyBuffer()
+    }
+
     // Internal state
     // Note: FreenectContext is managed by FreenectContextManager singleton
     private var device: KinectDevice? = null
     private var program: Program? = null
-    private var acquisitionThread: Thread? = null
-    private var running = false
-
-    // Coroutine scope for frame processing
-    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private var acquisitionScope: CoroutineScope? = null
+    private var acquisitionJob: Job? = null
 
     override fun setup(program: Program) {
         this.program = program
@@ -84,13 +93,11 @@ class Kinect2 : Extension {
         logger.info("Pipeline type: $pipelineType (CPU recommended for OPENRNDR)")
 
         try {
-            // Check native library
             if (!Freenect.isLibraryLoaded()) {
                 throw RuntimeException("Kinect native library not loaded")
             }
             logger.info("libfreenect2 version: ${Freenect.getVersion()}")
 
-            // Get singleton context and open device
             val ctx = FreenectContextManager.getContext()
 
             val deviceCount = ctx.getDeviceCount()
@@ -100,7 +107,6 @@ class Kinect2 : Extension {
                 throw RuntimeException("No Kinect V2 devices found")
             }
 
-            // Open device
             device = if (deviceSerial != null) {
                 logger.info("Opening device with serial: $deviceSerial")
                 ctx.openDevice(deviceSerial, pipelineType)
@@ -115,7 +121,6 @@ class Kinect2 : Extension {
             logger.info("Device opened successfully")
             logger.info("Firmware version: ${dev.getFirmwareVersion()}")
 
-            // Initialize camera interfaces
             depthCamera = Kinect2DepthCamera()
             colorCamera = Kinect2ColorCamera()
             irCamera = Kinect2IRCamera()
@@ -126,17 +131,18 @@ class Kinect2 : Extension {
             if (enableInfrared) irCamera.initialize()
 
             // Start streaming
-            val frameTypes = mutableListOf<FrameType>()
-            if (enableDepth) frameTypes.add(FrameType.DEPTH)
-            if (enableColor) frameTypes.add(FrameType.COLOR)
-            if (enableInfrared) frameTypes.add(FrameType.IR)
+            val frameTypes = buildList {
+                if (enableDepth) add(FrameType.DEPTH)
+                if (enableColor) add(FrameType.COLOR)
+                if (enableInfrared) add(FrameType.IR)
+            }
 
             dev.start(*frameTypes.toTypedArray())
             logger.info("Streaming started for: ${frameTypes.joinToString()}")
 
-            // Start acquisition thread
-            running = true
-            acquisitionThread = thread(name = "Kinect2-Acquisition") {
+            // Start acquisition coroutine on IO dispatcher (blocking JNI calls)
+            acquisitionScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+            acquisitionJob = acquisitionScope!!.launch {
                 runAcquisitionLoop()
             }
 
@@ -153,48 +159,77 @@ class Kinect2 : Extension {
      * Frame acquisition loop running on dedicated thread.
      * Fetches frames from libfreenect2 and publishes to StateFlow.
      */
-    private fun runAcquisitionLoop() {
-        logger.info("Acquisition thread started")
+    private suspend fun runAcquisitionLoop() {
+        logger.info("Acquisition coroutine started")
         val dev = device ?: return
 
         try {
-            while (running) {
+            while (coroutineContext.isActive) {
                 try {
-                    // Fetch depth frame
-                    if (enableDepth) {
-                        val depthFrame = dev.getNextFrame(FrameType.DEPTH, 100)
-                        if (depthFrame != null) {
-                            depthCamera.publishFrame(depthFrame)
-                            depthFrame.close()
+                    // Use synchronized frame acquisition when both depth and color are enabled
+                    if (enableDepth && enableColor) {
+                        // Get synchronized frames (depth + color) with automatic registration
+                        val frames = dev.getSynchronizedFrames(100)
+
+                        if (frames != null && frames.size >= 2) {
+                            // frames[0] = depth, frames[1] = color
+                            depthCamera.publishFrame(frames[0])
+                            colorCamera.publishFrame(frames[1])
+
+                            // Get registered color buffer aligned to depth space
+                            registeredColorBuffer.rewind()
+                            dev.getRegisteredBuffer(registeredColorBuffer)
+
+                            // Close frames
+                            frames[0].close()
+                            frames[1].close()
+                        }
+
+                        // Handle IR separately if enabled
+                        if (enableInfrared) {
+                            val irFrame = dev.getNextFrame(FrameType.IR, 100)
+                            if (irFrame != null) {
+                                irCamera.publishFrame(irFrame)
+                                irFrame.close()
+                            }
+                        }
+                    } else {
+                        // Fall back to individual frame fetching when not using both depth+color
+                        if (enableDepth) {
+                            val depthFrame = dev.getNextFrame(FrameType.DEPTH, 100)
+                            if (depthFrame != null) {
+                                depthCamera.publishFrame(depthFrame)
+                                depthFrame.close()
+                            }
+                        }
+
+                        if (enableColor) {
+                            val colorFrame = dev.getNextFrame(FrameType.COLOR, 100)
+                            if (colorFrame != null) {
+                                colorCamera.publishFrame(colorFrame)
+                                colorFrame.close()
+                            }
+                        }
+
+                        if (enableInfrared) {
+                            val irFrame = dev.getNextFrame(FrameType.IR, 100)
+                            if (irFrame != null) {
+                                irCamera.publishFrame(irFrame)
+                                irFrame.close()
+                            }
                         }
                     }
 
-                    // Fetch color frame
-                    if (enableColor) {
-                        val colorFrame = dev.getNextFrame(FrameType.COLOR, 100)
-                        if (colorFrame != null) {
-                            colorCamera.publishFrame(colorFrame)
-                            colorFrame.close()
-                        }
-                    }
-
-                    // Fetch IR frame
-                    if (enableInfrared) {
-                        val irFrame = dev.getNextFrame(FrameType.IR, 100)
-                        if (irFrame != null) {
-                            irCamera.publishFrame(irFrame)
-                            irFrame.close()
-                        }
-                    }
-
+                } catch (e: CancellationException) {
+                    throw e  // Re-throw to allow proper cancellation
                 } catch (e: Exception) {
-                    if (running) {
+                    if (coroutineContext.isActive) {
                         logger.error("Error in acquisition loop", e)
                     }
                 }
             }
         } finally {
-            logger.info("Acquisition thread stopped")
+            logger.info("Acquisition coroutine stopped")
         }
     }
 
@@ -217,38 +252,30 @@ class Kinect2 : Extension {
     }
 
     private fun cleanup() {
-        running = false
-
-        // Stop acquisition thread
-        acquisitionThread?.let {
-            it.interrupt()
-            it.join(1000)
+        // Cancel acquisition coroutine
+        acquisitionJob?.cancel()
+        runCatching {
+            runBlocking { acquisitionJob?.join() }
         }
-
-        // Cancel coroutine scope
-        scope.cancel()
+        acquisitionScope?.cancel()
 
         // Close device
         device?.let {
-            try {
-                it.close()
-                logger.info("Device closed")
-            } catch (e: Exception) {
-                logger.error("Error closing device", e)
-            }
+            runCatching { it.close() }
+                .onSuccess { logger.info("Device closed") }
+                .onFailure { e -> logger.error("Error closing device", e) }
         }
 
-        // Context is managed by FreenectContextManager singleton
-        // It will be automatically cleaned up on JVM shutdown
-        // Do NOT close it here - other Kinect2 instances may be using it
+        // Context is managed by FreenectContextManager singleton and will be automatically cleaned up on JVM shutdown
 
         // Clean up camera resources
-        if (::depthCamera.isInitialized) depthCamera.dispose()
-        if (::colorCamera.isInitialized) colorCamera.dispose()
-        if (::irCamera.isInitialized) irCamera.dispose()
+        runCatching { if (::depthCamera.isInitialized) depthCamera.dispose() }
+        runCatching { if (::colorCamera.isInitialized) colorCamera.dispose() }
+        runCatching { if (::irCamera.isInitialized) irCamera.dispose() }
 
         device = null
-        acquisitionThread = null
+        acquisitionJob = null
+        acquisitionScope = null
     }
 }
 
@@ -263,7 +290,8 @@ abstract class Kinect2Camera(
     val colorType: ColorType,
     private val bytesPerPixel: Int
 ) {
-    private val logger = LoggerFactory.getLogger(javaClass)
+    private companion object { val baseLogger = LoggerFactory.getLogger(Kinect2Camera::class.java) }
+    private val logger = baseLogger
 
     // Front buffer (GPU-resident, accessed by render thread)
     lateinit var currentFrame: ColorBuffer
@@ -280,9 +308,9 @@ abstract class Kinect2Camera(
     val frameFlow: StateFlow<Frame?> = _frameFlow
 
     // Frame statistics
-    var framesReceived: Long = 0
+    @Volatile var framesReceived: Long = 0
         private set
-    var lastTimestamp: Long = 0
+    @Volatile var lastTimestamp: Long = 0
         private set
 
     var initialized = false
@@ -369,6 +397,17 @@ abstract class Kinect2Camera(
     protected abstract fun processFrameData(frame: Frame, buffer: ByteBuffer)
 
     /**
+     * Get a snapshot of the current front buffer data.
+     * Returns a read-only view of the buffer for safe access.
+     * Caller must not modify the buffer contents.
+     */
+    fun getDataBuffer(): ByteBuffer? {
+        return synchronized(bufferLock) {
+            frontDataBuffer?.asReadOnlyBuffer()
+        }
+    }
+
+    /**
      * Dispose ColorBuffer resources.
      */
     fun dispose() {
@@ -438,7 +477,7 @@ class Kinect2DepthCamera : Kinect2Camera(
                         // Normalize to 0.0-1.0 range
                         val normalized = (i - MIN_DEPTH) / (MAX_DEPTH - MIN_DEPTH)
                         // Apply gamma correction
-                        val gammaCorrected = Math.pow(normalized, 1.0 / GAMMA)
+                        val gammaCorrected = normalized.pow(1.0 / GAMMA)
                         // INVERT: close (normalized=0) should be bright (255), far (normalized=1) should be dark (0)
                         this[i] = ((1.0 - gammaCorrected) * 255).toInt().coerceIn(0, 255)
                     }
@@ -449,32 +488,39 @@ class Kinect2DepthCamera : Kinect2Camera(
 
     private val logger = LoggerFactory.getLogger(Kinect2DepthCamera::class.java)
 
+    // Raw depth (millimeters) double-buffered storage for point cloud consumers
+    private val depthBufferLock = Any()
+    private var frontDepthBuffer: ByteBuffer? = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.LITTLE_ENDIAN)
+    private var backDepthBuffer: ByteBuffer? = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.LITTLE_ENDIAN)
+
+    /**
+     * Expose a read-only view of the latest raw depth millimeter values as a LITTLE_ENDIAN Float buffer.
+     * Each pixel is a 32-bit float containing millimeters (e.g., 750.0f for 0.75m). May return null before first frame.
+     */
+    fun getDepthMillimeters(): ByteBuffer? = synchronized(depthBufferLock) {
+        frontDepthBuffer?.let { buf ->
+            val ro = buf.asReadOnlyBuffer()
+            ro.order(ByteOrder.LITTLE_ENDIAN)
+            ro
+        }
+    }
+
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
-        val data = frame.data
+        val data = frame.data.order(ByteOrder.LITTLE_ENDIAN)
         data.position(0)
 
-        // Debug: sample center pixel and find closest pixel every 30 frames
         val shouldLog = (frame.sequence % 30L == 0L)
-        var minDepth = Int.MAX_VALUE
-        var minX = -1
-        var minY = -1
-        var validPixels = 0
+
+        // Prepare raw depth back buffer for mm values
+        val rawBack = backDepthBuffer
+        rawBack?.clear()
 
         // Process depth frame: convert to grayscale with INVERTED mapping
         // Standard "X-Ray" visualization: close=bright (255), far=dark (0)
         for (y in 0 until height) {
             for (x in 0 until width) {
                 val srcIdx = y * width + x
-                data.position(srcIdx * 4)
-
-                // Read as 32-bit little-endian float (millimeters)
-                // libfreenect2 provides depth data as 32-bit IEEE 754 floats, not 16-bit integers
-                val byte0 = data.get().toInt() and 0xFF
-                val byte1 = data.get().toInt() and 0xFF
-                val byte2 = data.get().toInt() and 0xFF
-                val byte3 = data.get().toInt() and 0xFF
-                val bits = (byte3 shl 24) or (byte2 shl 16) or (byte1 shl 8) or byte0
-                val depthFloat = Float.fromBits(bits)
+                val depthFloat = data.getFloat(srcIdx * 4)
 
                 // Convert to int for gamma table lookup, handle invalid values
                 val depthMm = when {
@@ -482,32 +528,18 @@ class Kinect2DepthCamera : Kinect2Camera(
                     else -> depthFloat.toInt()
                 }
 
+                // Write raw mm as float to raw back buffer if available
+                rawBack?.putFloat(srcIdx * 4, if (depthMm == 0) 0f else depthFloat)
+
                 val dstIdx = (height - 1 - y) * width + x
 
-//                // Track closest pixel for diagnostics (ignore 1-2mm as sensor noise/damage)
-//                if (shouldLog && depthMm > 0 && depthMm < 65535) {
-//                    validPixels++
-//                    if (depthMm > 100 && depthMm < minDepth) {  // Ignore 1-2mm readings
-//                        minDepth = depthMm
-//                        minX = x
-//                        minY = y
-//                    }
-//                }
-
-                // Depth visualization with gamma correction:
-                // - Close objects (500-1500mm): BRIGHT (200-255 gray) - user should appear white/bright
-                // - Mid-range objects (1500-4000mm): GREY (100-200 gray)
-                // - Far objects (4000-8000mm): DARK (0-100 gray) - background should be dark grey
-                // - Invalid/no data (0mm): BLACK (0)
-                // - Very far (>8000mm): BLACK (0)
-                //
-                // Uses pre-calculated gamma LUT for performance
+                // Apply depth visualization with gamma correction
                 val gray = depthGammaTable[depthMm.coerceIn(0, 65535)]
                 val grayValue = gray.toByte()
 
                 // Debug center pixel
                 if (shouldLog && x == width/2 && y == height/2) {
-                    logger.info("DEPTH Center pixel: depthMm=$depthMm, gray=$gray (${gray*100/255}%)")
+                    logger.debug("DEPTH Center pixel: depthMm=$depthMm, gray=$gray (${gray*100/255}%)")
                 }
 
                 buffer.position(dstIdx * 4)
@@ -518,12 +550,11 @@ class Kinect2DepthCamera : Kinect2Camera(
             }
         }
 
-        // Log closest pixel found
-        if (shouldLog && minX >= 0) {
-            val closestGray = depthGammaTable[minDepth.coerceIn(0, 65535)]
-            val totalPixels = width * height
-            val validPercent = (validPixels * 100.0) / totalPixels
-            logger.info("DEPTH Closest pixel at ($minX, $minY): depthMm=${minDepth}mm, gray=$closestGray (${closestGray*100/255}%) | Valid pixels: $validPixels/$totalPixels (${String.format("%.1f", validPercent)}%)")
+        // Swap raw depth buffers so readers see the latest mm values
+        synchronized(depthBufferLock) {
+            val tmp = frontDepthBuffer
+            frontDepthBuffer = backDepthBuffer
+            backDepthBuffer = tmp
         }
     }
 }
@@ -539,12 +570,33 @@ class Kinect2ColorCamera : Kinect2Camera(
     colorType = ColorType.UINT8,
     bytesPerPixel = 3  // RGB = 3 bytes
 ) {
-    private val logger = LoggerFactory.getLogger(Kinect2ColorCamera::class.java)
+    private companion object { val logger = LoggerFactory.getLogger(Kinect2ColorCamera::class.java) }
+
+    // Raw color (BGRX) double-buffered storage for registration consumers
+    private val colorBufferLock = Any()
+    private var frontColorBuffer: ByteBuffer? = ByteBuffer.allocateDirect(width * height * 4)
+    private var backColorBuffer: ByteBuffer? = ByteBuffer.allocateDirect(width * height * 4)
+
+    /**
+     * Expose a read-only view of the latest raw color BGRX data.
+     * Each pixel is 4 bytes (B, G, R, X). May return null before first frame.
+     */
+    fun getRawColorData(): ByteBuffer? = synchronized(colorBufferLock) {
+        frontColorBuffer?.asReadOnlyBuffer()
+    }
 
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
         val data = frame.data
 
-        // Convert BGRX to RGB with vertical flip
+        // Store raw BGRX data in back buffer for registration
+        val rawBack = backColorBuffer
+        rawBack?.clear()
+        if (rawBack != null) {
+            data.position(0)
+            rawBack.put(data)
+        }
+
+        // Convert BGRX to RGB with vertical flip for display
         data.position(0)
         for (y in 0 until height) {
             for (x in 0 until width) {
@@ -564,6 +616,13 @@ class Kinect2ColorCamera : Kinect2Camera(
                 buffer.put(b)
             }
         }
+
+        // Swap raw color buffers so readers see the latest BGRX data
+        synchronized(colorBufferLock) {
+            val tmp = frontColorBuffer
+            frontColorBuffer = backColorBuffer
+            backColorBuffer = tmp
+        }
     }
 }
 
@@ -578,28 +637,19 @@ class Kinect2IRCamera : Kinect2Camera(
     colorType = ColorType.UINT8,
     bytesPerPixel = 4  // RGBa = 4 bytes
 ) {
-    private val logger = LoggerFactory.getLogger(Kinect2IRCamera::class.java)
+    private companion object { val logger = LoggerFactory.getLogger(Kinect2IRCamera::class.java) }
 
     override fun processFrameData(frame: Frame, buffer: ByteBuffer) {
-        val data = frame.data
+        val data = frame.data.order(ByteOrder.LITTLE_ENDIAN)
 
-        // Convert 16-bit IR to grayscale with vertical flip
+        // Convert float IR to grayscale with vertical flip
         // Use realistic max of 20000 instead of 65535 for better visibility
         // Most indoor IR values are 0-10000, so 20000 gives good contrast
         data.position(0)
         for (y in 0 until height) {
             for (x in 0 until width) {
                 val srcIdx = y * width + x
-                data.position(srcIdx * 4)  // 4 bytes per pixel (float)
-
-                // Read as 32-bit little-endian float
-                // libfreenect2 provides IR data as 32-bit IEEE 754 floats, not 16-bit integers
-                val byte0 = data.get().toInt() and 0xFF
-                val byte1 = data.get().toInt() and 0xFF
-                val byte2 = data.get().toInt() and 0xFF
-                val byte3 = data.get().toInt() and 0xFF
-                val bits = (byte3 shl 24) or (byte2 shl 16) or (byte1 shl 8) or byte0
-                val irFloat = Float.fromBits(bits)
+                val irFloat = data.getFloat(srcIdx * 4)
 
                 // Convert to int for normalization, handle invalid values
                 val ir = when {

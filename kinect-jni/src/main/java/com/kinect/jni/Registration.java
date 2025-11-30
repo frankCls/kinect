@@ -35,8 +35,12 @@ public class Registration implements AutoCloseable {
      * @return Registration instance
      */
     public static Registration create(KinectDevice device) {
-        // Will be implemented with native methods
-        throw new UnsupportedOperationException("Not yet implemented");
+        Calibration calibration = device.getCalibration();
+        long nativeHandle = nativeCreateRegistration(calibration);
+        if (nativeHandle == 0) {
+            throw new RuntimeException("Failed to create Registration");
+        }
+        return new Registration(nativeHandle, calibration);
     }
 
     /**
@@ -60,19 +64,31 @@ public class Registration implements AutoCloseable {
     }
 
     /**
-     * Apply depth-to-color registration.
+     * Get the native handle (package-private for use by KinectDevice).
      *
-     * This maps depth frame pixels to color frame coordinates.
+     * @return native pointer to libfreenect2::Registration
+     */
+    long getNativeHandle() {
+        return nativeHandle;
+    }
+
+    /**
+     * Apply depth-to-color registration to get RGB color for each depth pixel.
      *
-     * @param depthFrame input depth frame (512x424)
-     * @param colorFrame input color frame (1920x1080)
-     * @return registered depth frame in color space
+     * This maps each depth frame pixel to its corresponding color from the color frame.
+     * The output is a 512x424 BGRX image where each pixel contains the color from
+     * the corresponding 3D point in the color camera's view.
+     *
+     * @param depthData depth frame data buffer (512x424 floats, in millimeters)
+     * @param colorData color frame data buffer (1920x1080 BGRX, 4 bytes per pixel)
+     * @param outputBuffer output buffer for registered colors (512x424 BGRX, 4 bytes per pixel)
      * @throws IllegalStateException if registration is closed
      */
-    public Frame applyRegistration(Frame depthFrame, Frame colorFrame) {
+    public void applyRegistration(java.nio.ByteBuffer depthData,
+                                   java.nio.ByteBuffer colorData,
+                                   java.nio.ByteBuffer outputBuffer) {
         checkNotClosed();
-        // Will be implemented with native methods
-        throw new UnsupportedOperationException("Not yet implemented");
+        nativeApplyRegistration(nativeHandle, depthData, colorData, outputBuffer);
     }
 
     /**
@@ -135,6 +151,26 @@ public class Registration implements AutoCloseable {
     }
 
     // Native method declarations
+
+    /**
+     * Create native registration object from calibration.
+     *
+     * @param calibration device calibration parameters
+     * @return native pointer to libfreenect2::Registration
+     */
+    private static native long nativeCreateRegistration(Calibration calibration);
+
+    /**
+     * Apply depth-to-color registration.
+     *
+     * @param handle native pointer to libfreenect2::Registration
+     * @param depthData depth frame data buffer (512x424 floats, mm)
+     * @param colorData color frame data buffer (1920x1080 BGRX, 4 bytes per pixel)
+     * @param outputBuffer output buffer for registered colors (512x424 BGRX, 4 bytes per pixel)
+     */
+    private native void nativeApplyRegistration(long handle, java.nio.ByteBuffer depthData,
+                                                 java.nio.ByteBuffer colorData,
+                                                 java.nio.ByteBuffer outputBuffer);
 
     /**
      * Destroy native registration object.

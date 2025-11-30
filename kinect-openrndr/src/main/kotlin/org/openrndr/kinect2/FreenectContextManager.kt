@@ -92,13 +92,6 @@ object FreenectContextManager {
     }
 
     /**
-     * Check if the singleton context has been initialized.
-     *
-     * @return true if context exists, false otherwise
-     */
-    fun isInitialized(): Boolean = context != null
-
-    /**
      * Register JVM shutdown hook to cleanup context on application exit.
      *
      * This ensures native resources are properly freed even if the application
