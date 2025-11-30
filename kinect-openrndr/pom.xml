@@ -84,6 +84,13 @@
             <version>${openrndr.version}</version>
         </dependency>
 
+        <!-- ORX GUI for user interface controls (includes panel and parameters) -->
+        <dependency>
+            <groupId>org.openrndr.extra</groupId>
+            <artifactId>orx-gui</artifactId>
+            <version>${openrndr.version}</version>
+        </dependency>
+
         <!-- LWJGL natives for macOS (required for GL3) - version 3.3.3 to match openrndr-gl3 -->
         <dependency>
             <groupId>org.lwjgl</groupId>

@@ -4,6 +4,8 @@ import org.openrndr.application
 import org.openrndr.color.ColorRGBa
 import org.openrndr.draw.*
 import org.openrndr.extra.camera.Orbital
+import org.openrndr.extra.gui.GUI
+import org.openrndr.extra.parameters.BooleanParameter
 import org.openrndr.kinect2.Kinect2
 import org.openrndr.kinect2.Kinect2Manager
 import org.openrndr.math.Vector3
@@ -32,6 +34,7 @@ import org.slf4j.LoggerFactory
  * - **R**: Reset camera to default position
  * - **+/-**: Increase/decrease downsampling for performance
  * - **Space**: Pause/resume point cloud updates
+ * - **F11**: Toggle UI panel visibility
  *
  * **Performance Notes**:
  * - Initial downsampling: 4x (processes every 4th pixel) = ~13K points
@@ -43,9 +46,18 @@ import org.slf4j.LoggerFactory
 fun main() {
     val logger = LoggerFactory.getLogger("Kinect2PointCloudExample")
 
+    // UI Settings
+    val settings = object {
+        @BooleanParameter("Show Coordinate Axes", order = 0)
+        var showAxes = false
+
+        @BooleanParameter("Show Reference Grid", order = 1)
+        var showGrid = true
+    }
+
     // Configuration constants
     val TARGET_FPS = 30.0
-    val DEPTH_MIN = 500.0     // mm (0.5m)
+    val DEPTH_MIN = 50.0     // mm (0.5m)
     val DEPTH_MAX = 5000.0    // mm (5m)
     val DEPTH_RANGE = 1500.0  // mm (1.5m) - show points within this range from closest
     val DOWNSAMPLE_INITIAL = 4  // Balance between detail and performance
@@ -106,6 +118,7 @@ fun main() {
             println("  - R: Reset camera")
             println("  - +/-: Change downsampling")
             println("  - Space: Pause point cloud update")
+            println("  - F11: Toggle UI panel")
 
             // Create Kinect2 extension
             val kinect = extend(Kinect2()) {
@@ -125,6 +138,11 @@ fun main() {
             camera.far = 10.0                     // Far clip plane (10m)
 
             extend(camera)
+
+            // Setup GUI
+            val gui = GUI()
+            gui.add(settings, "Display Settings")
+            extend(gui)
 
             keyboard.keyDown.listen { event ->
                 when (event.name) {
@@ -223,29 +241,33 @@ fun main() {
                         // No need to manually set view/projection matrices
 
                         // Draw reference grid (ground plane at Y=0)
-                        drawer.stroke = ColorRGBa.GRAY.opacify(0.3)
-                        drawer.strokeWeight = 1.0
-                        val gridSize = 2.0
-                        val gridStep = 0.2
-                        for (i in (-10..10)) {
-                            val pos = i * gridStep
-                            // X lines
-                            drawer.lineSegment(Vector3(pos, 0.0, -gridSize), Vector3(pos, 0.0, gridSize))
-                            // Z lines
-                            drawer.lineSegment(Vector3(-gridSize, 0.0, pos), Vector3(gridSize, 0.0, pos))
+                        if (settings.showGrid) {
+                            drawer.stroke = ColorRGBa.GRAY.opacify(0.3)
+                            drawer.strokeWeight = 1.0
+                            val gridSize = 2.0
+                            val gridStep = 0.2
+                            for (i in (-10..10)) {
+                                val pos = i * gridStep
+                                // X lines
+                                drawer.lineSegment(Vector3(pos, 0.0, -gridSize), Vector3(pos, 0.0, gridSize))
+                                // Z lines
+                                drawer.lineSegment(Vector3(-gridSize, 0.0, pos), Vector3(gridSize, 0.0, pos))
+                            }
                         }
 
                         // Draw coordinate axes
-                        drawer.strokeWeight = 2.0
-                        // X axis (red)
-                        drawer.stroke = ColorRGBa.RED
-                        drawer.lineSegment(Vector3.ZERO, Vector3(0.5, 0.0, 0.0))
-                        // Y axis (green)
-                        drawer.stroke = ColorRGBa.GREEN
-                        drawer.lineSegment(Vector3.ZERO, Vector3(0.0, 0.5, 0.0))
-                        // Z axis (blue)
-                        drawer.stroke = ColorRGBa.BLUE
-                        drawer.lineSegment(Vector3.ZERO, Vector3(0.0, 0.0, 0.5))
+                        if (settings.showAxes) {
+                            drawer.strokeWeight = 2.0
+                            // X axis (red)
+                            drawer.stroke = ColorRGBa.RED
+                            drawer.lineSegment(Vector3.ZERO, Vector3(0.5, 0.0, 0.0))
+                            // Y axis (green)
+                            drawer.stroke = ColorRGBa.GREEN
+                            drawer.lineSegment(Vector3.ZERO, Vector3(0.0, 0.5, 0.0))
+                            // Z axis (blue)
+                            drawer.stroke = ColorRGBa.BLUE
+                            drawer.lineSegment(Vector3.ZERO, Vector3(0.0, 0.0, 0.5))
+                        }
 
                         // Draw point cloud using GPU vertex buffer (much faster than individual draws)
                         if (points.isNotEmpty()) {
@@ -293,7 +315,7 @@ fun main() {
                     drawer.text("Downsample: ${downsample}x", 10.0, 110.0)
 
                     // Instructions
-                    drawer.text("Controls: Mouse=orbit, Scroll=zoom, WASD=move, EQ=up/down, R=reset", 10.0, height - 30.0)
+                    drawer.text("Controls: Mouse=orbit, Scroll=zoom, WASD=move, EQ=up/down, R=reset, F11=UI", 10.0, height - 30.0)
                 } else {
                     drawer.fill = ColorRGBa.RED
                     drawer.text("Waiting for depth/color frames...", 10.0, 30.0)
