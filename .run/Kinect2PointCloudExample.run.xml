@@ -1,0 +1,17 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Kinect2PointCloudExample" type="JetRunConfigurationType">
+    <option name="MAIN_CLASS_NAME" value="org.openrndr.kinect2.examples.Kinect2PointCloudExampleKt" />
+    <module name="kinect-openrndr" />
+    <option name="VM_PARAMETERS" value="-Djava.library.path=/Users/frank.claes/dev-private/kinect/kinect-jni/target:/Users/frank.claes/freenect2/lib" />
+    <option name="PROGRAM_PARAMETERS" value="" />
+    <option name="WORKING_DIRECTORY" value="/Users/frank.claes/dev-private/kinect/kinect-openrndr" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="false" />
+    <option name="ALTERNATIVE_JRE_PATH" />
+    <option name="ENABLE_SWING_INSPECTOR" value="false" />
+    <option name="ENV_VARIABLES" />
+    <option name="PASS_PARENT_ENVS" value="true" />
+    <method v="2">
+      <option name="Maven.BeforeRunTask" enabled="true" file="/Users/frank.claes/dev-private/kinect/pom.xml" goal="install -pl kinect-jni,kinect-core,kinect-openrndr -am" />
+    </method>
+  </configuration>
+</component>

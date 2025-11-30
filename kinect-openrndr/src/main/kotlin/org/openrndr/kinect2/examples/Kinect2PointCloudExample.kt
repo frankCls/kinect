@@ -46,6 +46,14 @@ import org.slf4j.LoggerFactory
 fun main() {
     val logger = LoggerFactory.getLogger("Kinect2PointCloudExample")
 
+    println("=== Kinect V2 Point Cloud Example Starting ===")
+
+    // Register shutdown hook for clean Ctrl+C handling
+    Runtime.getRuntime().addShutdownHook(Thread {
+        println("\n=== Shutdown hook triggered (Ctrl+C or system exit) ===")
+        println("Cleaning up resources...")
+    })
+
     // UI Settings
     val settings = object {
         @BooleanParameter("Show Coordinate Axes", order = 0)
@@ -143,6 +151,12 @@ fun main() {
             val gui = GUI()
             gui.add(settings, "Display Settings")
             extend(gui)
+
+            // Handle window close event for clean shutdown
+            window.closed.listen {
+                logger.info("Window closed, requesting application exit...")
+                application.exit()
+            }
 
             keyboard.keyDown.listen { event ->
                 when (event.name) {
@@ -323,4 +337,6 @@ fun main() {
             }
         }
     }
+
+    println("=== Kinect V2 Point Cloud Example Finished ===")
 }
