@@ -6,6 +6,7 @@
 #   ./run-example.sh depth                        # Run depth example
 #   ./run-example.sh full                         # Run full multi-stream example
 #   ./run-example.sh pointcloud                   # Run point cloud example
+#   ./run-example.sh mesh                         # Run 3D mesh example
 
 cd "$(dirname "$0")"
 
@@ -25,9 +26,13 @@ case "$EXAMPLE" in
         MAIN_CLASS="org.openrndr.kinect2.examples.Kinect2PointCloudExampleKt"
         echo "Running Point Cloud Example..."
         ;;
+    mesh)
+        MAIN_CLASS="org.openrndr.kinect2.examples.Kinect2MeshExampleKt"
+        echo "Running 3D Mesh Example..."
+        ;;
     *)
         echo "Unknown example: $EXAMPLE"
-        echo "Usage: $0 [depth|full|pointcloud]"
+        echo "Usage: $0 [depth|full|pointcloud|mesh]"
         exit 1
         ;;
 esac
