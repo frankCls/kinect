@@ -188,6 +188,20 @@
             <artifactId>slf4j-api</artifactId>
         </dependency>
 
+        <!-- JavaCV for computer vision (includes OpenCV) -->
+        <dependency>
+            <groupId>org.bytedeco</groupId>
+            <artifactId>javacv-platform</artifactId>
+            <version>1.5.10</version>
+        </dependency>
+
+        <!-- Gson for JSON serialization (drum kit configs) -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.10.1</version>
+        </dependency>
+
         <!-- Testing -->
         <dependency>
             <groupId>org.jetbrains.kotlin</groupId>

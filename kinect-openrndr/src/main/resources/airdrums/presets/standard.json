@@ -1,0 +1,71 @@
+{
+  "name": "Standard Kit",
+  "zones": [
+    {
+      "id": "snare",
+      "name": "Snare",
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.7,
+      "radius": 0.15,
+      "midiNote": 38,
+      "midiChannel": 9,
+      "colorHex": "#ff6b6b"
+    },
+    {
+      "id": "hihat",
+      "name": "Hi-Hat",
+      "x": -0.35,
+      "y": 0.3,
+      "z": 0.6,
+      "radius": 0.12,
+      "midiNote": 42,
+      "midiChannel": 9,
+      "colorHex": "#4ecdc4"
+    },
+    {
+      "id": "high-tom",
+      "name": "High Tom",
+      "x": -0.25,
+      "y": 0.2,
+      "z": 0.65,
+      "radius": 0.14,
+      "midiNote": 50,
+      "midiChannel": 9,
+      "colorHex": "#95e1d3"
+    },
+    {
+      "id": "mid-tom",
+      "name": "Mid Tom",
+      "x": 0.25,
+      "y": 0.2,
+      "z": 0.65,
+      "radius": 0.14,
+      "midiNote": 48,
+      "midiChannel": 9,
+      "colorHex": "#f38181"
+    },
+    {
+      "id": "crash",
+      "name": "Crash",
+      "x": 0.45,
+      "y": 0.4,
+      "z": 0.75,
+      "radius": 0.18,
+      "midiNote": 49,
+      "midiChannel": 9,
+      "colorHex": "#ffd93d"
+    },
+    {
+      "id": "ride",
+      "name": "Ride",
+      "x": 0.55,
+      "y": 0.35,
+      "z": 0.85,
+      "radius": 0.20,
+      "midiNote": 51,
+      "midiChannel": 9,
+      "colorHex": "#aa96da"
+    }
+  ]
+}

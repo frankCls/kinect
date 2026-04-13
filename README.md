@@ -10,6 +10,7 @@ High-performance Java/Kotlin integration for Microsoft Kinect V2 on macOS using 
 - **Zero-Copy Performance**: Direct ByteBuffer access to frame data
 - **Type-Safe API**: Kotlin wrapper with modern idioms
 - **Cross-Platform**: JNI layer compatible with macOS, Linux, Windows (via libfreenect2)
+- **🥁 Air Drums**: Interactive MIDI drum kit using hand tracking! (see [Air Drums Guide](kinect-openrndr/AIRDRUMS.md))
 
 ## Architecture
 
@@ -467,6 +468,41 @@ kinect/
 │       └── examples/                   # Example programs
 └── kinect-app/                         # Sample application
 ```
+
+## 🥁 Air Drums - Interactive MIDI Drum Kit
+
+Transform your Kinect V2 into a velocity-sensitive air drum kit! Wave your hands to trigger MIDI drum sounds in GarageBand, Ableton, Logic Pro, or any DAW.
+
+### Quick Start
+
+```bash
+# 1. Enable IAC Driver (macOS virtual MIDI)
+open "/Applications/Utilities/Audio MIDI Setup.app"
+# → Show MIDI Studio → Enable "IAC Driver"
+
+# 2. Run Air Drums
+cd kinect-openrndr
+./run-airdrums.sh
+
+# 3. Connect your DAW to "IAC Driver Bus 1"
+# 4. Start drumming! 🥁
+```
+
+**Features:**
+- ✅ Velocity-sensitive hits (faster = louder)
+- ✅ 2-hand tracking
+- ✅ Configurable drum kits (Standard 6-piece, Minimal 4-piece)
+- ✅ Real-time 3D visualization
+- ✅ General MIDI compatibility
+
+**Controls:**
+- `1` / `2`: Switch drum kits
+- `Space`: Toggle depth view
+- `D`: Toggle debug info
+
+📖 **Full Guide:** [Air Drums Documentation](kinect-openrndr/AIRDRUMS.md)
+
+---
 
 ## OPENRNDR Integration
 

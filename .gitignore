@@ -35,3 +35,11 @@ buildNumber.properties
 *.tmp
 *.swp
 *~
+
+# Python virtual environments
+.venv/
+__pycache__/
+*.pyc
+
+# MediaPipe model files (downloaded by setup_python.sh)
+*.task
