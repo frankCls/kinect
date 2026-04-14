@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Run Air Drums application
-# This script configures the correct library paths and JVM arguments
+# Launches Java directly (not via mvn exec:exec) so Ctrl+C cleanly
+# terminates the JVM and OPENRNDR window.
 
 set -e
 
@@ -54,29 +55,50 @@ if [ ! -f "$HOME/freenect2/lib/libfreenect2.dylib" ]; then
 	exit 1
 fi
 
-# Build if needed
+# Build
 echo "Building kinect-openrndr module..."
 cd "$SCRIPT_DIR"
 mvn -q compile
 echo "Build complete"
 echo ""
 
-# Run application
+# Resolve classpath via Maven
+# Use dependency:build-classpath (reliable) instead of exec:exec echo %classpath (broken)
+echo "Resolving classpath..."
+DEP_CP=$(mvn -q dependency:build-classpath -Dmdep.outputFile=/dev/stdout 2>/dev/null)
+
+if [ -z "$DEP_CP" ]; then
+	echo "ERROR: Could not resolve dependency classpath"
+	exit 1
+fi
+
+# Prepend compiled classes directory
+CLASSPATH="$SCRIPT_DIR/target/classes:$DEP_CP"
+
+# Verify classes directory exists
+if [ ! -d "$SCRIPT_DIR/target/classes" ]; then
+	echo "ERROR: target/classes not found. Build may have failed."
+	exit 1
+fi
+
+# Run application directly (not via mvn exec:exec)
+# This ensures Ctrl+C sends SIGINT directly to the JVM, which triggers
+# the shutdown hook and cleanly exits OPENRNDR + Python subprocess.
 echo "Starting Air Drums..."
 echo ""
 echo "Controls:"
-echo "  1: Load Standard drum kit (6 pieces)"
-echo "  2: Load Minimal drum kit (4 pieces)"
-echo "  Space: Toggle depth view"
+echo "  1/2: Load Standard/Minimal drum kit"
+echo "  Space: Toggle depth/color view"
 echo "  D: Toggle debug info"
-echo "  M: List MIDI devices"
+echo "  T: Toggle MediaPipe/depth-only tracking"
 echo "  R: Reset hit detector"
+echo "  M: List MIDI devices"
+echo "  Arrows: Calibrate offset  0: Reset calibration"
 echo "  ESC: Quit"
 echo ""
 
-mvn exec:exec \
-	-Dexec.executable="java" \
-	-Dexec.args="-XstartOnFirstThread \
-        -Djava.library.path=$PROJECT_ROOT/kinect-jni/target:$HOME/freenect2/lib \
-        -classpath %classpath \
-        org.openrndr.kinect2.airdrums.AirDrumsAppKt"
+exec java \
+	-XstartOnFirstThread \
+	-Djava.library.path="$PROJECT_ROOT/kinect-jni/target:$HOME/freenect2/lib" \
+	-classpath "$CLASSPATH" \
+	org.openrndr.kinect2.airdrums.AirDrumsAppKt

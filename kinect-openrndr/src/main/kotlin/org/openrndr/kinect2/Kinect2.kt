@@ -255,7 +255,10 @@ class Kinect2 : Extension {
         // Cancel acquisition coroutine
         acquisitionJob?.cancel()
         runCatching {
-            runBlocking { acquisitionJob?.join() }
+            runBlocking {
+                withTimeoutOrNull(500) { acquisitionJob?.join() }
+                    ?: logger.warn("Acquisition coroutine did not stop within 500ms, proceeding with cleanup")
+            }
         }
         acquisitionScope?.cancel()
 

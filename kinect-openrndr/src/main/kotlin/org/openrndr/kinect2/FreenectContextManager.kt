@@ -103,17 +103,24 @@ object FreenectContextManager {
     private fun registerShutdownHook() {
         Runtime.getRuntime().addShutdownHook(thread(start = false, name = "FreenectContext-Cleanup") {
             logger.info("JVM shutdown detected, cleaning up singleton FreenectContext")
+            // IMPORTANT: We intentionally do NOT call context.close() here.
+            //
+            // On macOS, nativeDestroyContext() uses dispatch_sync(dispatch_get_main_queue(), ...)
+            // to ensure GLFW/OpenGL cleanup runs on the main thread. During JVM shutdown,
+            // the main thread's GCD dispatch queue is no longer being serviced, so
+            // dispatch_sync blocks forever → process hangs.
+            //
+            // This is safe to skip because:
+            // 1. The KinectDevice is already closed by Kinect2.shutdown() (device.close()
+            //    stops streaming and releases USB interfaces)
+            // 2. The OS reclaims all remaining resources (USB handles, memory, GL contexts)
+            //    when the process exits
+            // 3. libfreenect2's Freenect2 destructor only tears down internal bookkeeping
+            //    that becomes irrelevant at process exit
             synchronized(contextLock) {
-                context?.let {
-                    try {
-                        it.close()
-                        logger.info("Singleton FreenectContext closed successfully")
-                    } catch (e: Exception) {
-                        logger.error("Error closing singleton FreenectContext", e)
-                    }
-                }
                 context = null
             }
+            logger.info("FreenectContext cleanup skipped (OS reclaims resources at process exit)")
         })
         logger.debug("Shutdown hook registered for FreenectContext cleanup")
     }

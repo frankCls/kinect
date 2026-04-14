@@ -114,7 +114,7 @@ class DrumKit {
         addZone(DrumZone(
             id = "snare",
             name = "Snare",
-            position = Vector3(0.0, 0.0, 0.7),  // Center, waist height
+            position = Vector3(0.0, -0.2, 0.7),  // Center, waist height
             radius = 0.15,
             midiNote = DrumZone.MIDI_SNARE,
             color = ColorRGBa.fromHex(0xFF6B6B)
@@ -123,7 +123,7 @@ class DrumKit {
         addZone(DrumZone(
             id = "hihat",
             name = "Hi-Hat",
-            position = Vector3(-0.35, 0.3, 0.6),  // Left, higher
+            position = Vector3(-0.35, 0.1, 0.6),  // Left, higher
             radius = 0.12,
             midiNote = DrumZone.MIDI_CLOSED_HI_HAT,
             color = ColorRGBa.fromHex(0x4ECDC4)
@@ -132,7 +132,7 @@ class DrumKit {
         addZone(DrumZone(
             id = "high-tom",
             name = "High Tom",
-            position = Vector3(-0.25, 0.2, 0.65),  // Center-left, elevated
+            position = Vector3(-0.25, 0.0, 0.65),  // Center-left, elevated
             radius = 0.14,
             midiNote = DrumZone.MIDI_HIGH_TOM,
             color = ColorRGBa.fromHex(0x95E1D3)
@@ -141,7 +141,7 @@ class DrumKit {
         addZone(DrumZone(
             id = "mid-tom",
             name = "Mid Tom",
-            position = Vector3(0.25, 0.2, 0.65),  // Center-right, elevated
+            position = Vector3(0.25, 0.0, 0.65),  // Center-right, elevated
             radius = 0.14,
             midiNote = DrumZone.MIDI_MID_TOM,
             color = ColorRGBa.fromHex(0xF38181)
@@ -150,7 +150,7 @@ class DrumKit {
         addZone(DrumZone(
             id = "crash",
             name = "Crash",
-            position = Vector3(0.45, 0.4, 0.75),  // Right, high
+            position = Vector3(0.45, 0.2, 0.75),  // Right, high
             radius = 0.18,
             midiNote = DrumZone.MIDI_CRASH_CYMBAL,
             color = ColorRGBa.fromHex(0xFFD93D)
@@ -159,7 +159,7 @@ class DrumKit {
         addZone(DrumZone(
             id = "ride",
             name = "Ride",
-            position = Vector3(0.55, 0.35, 0.85),  // Far right, high
+            position = Vector3(0.55, 0.15, 0.85),  // Far right, high
             radius = 0.20,
             midiNote = DrumZone.MIDI_RIDE_CYMBAL,
             color = ColorRGBa.fromHex(0xAA96DA)
@@ -173,7 +173,7 @@ class DrumKit {
         addZone(DrumZone(
             id = "snare",
             name = "Snare",
-            position = Vector3(0.0, 0.0, 0.7),
+            position = Vector3(0.0, -0.2, 0.7),
             radius = 0.15,
             midiNote = DrumZone.MIDI_SNARE,
             color = ColorRGBa.fromHex(0xFF6B6B)
@@ -182,7 +182,7 @@ class DrumKit {
         addZone(DrumZone(
             id = "hihat",
             name = "Hi-Hat",
-            position = Vector3(-0.35, 0.25, 0.6),
+            position = Vector3(-0.35, 0.05, 0.6),
             radius = 0.12,
             midiNote = DrumZone.MIDI_CLOSED_HI_HAT,
             color = ColorRGBa.fromHex(0x4ECDC4)
@@ -191,7 +191,7 @@ class DrumKit {
         addZone(DrumZone(
             id = "crash",
             name = "Crash",
-            position = Vector3(0.4, 0.35, 0.75),
+            position = Vector3(0.4, 0.15, 0.75),
             radius = 0.18,
             midiNote = DrumZone.MIDI_CRASH_CYMBAL,
             color = ColorRGBa.fromHex(0xFFD93D)
@@ -200,7 +200,7 @@ class DrumKit {
         addZone(DrumZone(
             id = "kick",
             name = "Kick",
-            position = Vector3(0.0, -0.4, 0.5),  // Low, center (foot position)
+            position = Vector3(0.0, -0.6, 0.5),  // Low, center (foot position)
             radius = 0.20,
             midiNote = DrumZone.MIDI_KICK,
             color = ColorRGBa.fromHex(0x6C5CE7)
